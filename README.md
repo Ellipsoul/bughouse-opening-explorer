@@ -17,8 +17,9 @@ chess.com  ──(download)──►  raw games ─┐
 ```
 
 1. **download** walks a player's monthly archives on chess.com's public Published-Data API, keeps
-   the bughouse games, decodes their `tcn` move encoding, and upserts them into the `games` table.
-   It is resumable (a per-month ledger) and dedups across players by game `uuid`.
+   the bughouse games, and upserts them into the `games` table — storing chess.com's compact `tcn`
+   move encoding verbatim (it is decoded later, at index time). It is resumable (a per-month
+   ledger) and dedups across players by game `uuid`.
 2. **index** replays each game's moves on a single-board engine, keying positions by FEN so
    transpositions merge, and writes a per-game **facts** graph (`positions`/`moves`/`game_facts`/
    `games_meta`) into the same file. Nothing is pre-aggregated — every statistic is computed at
@@ -27,6 +28,40 @@ chess.com  ──(download)──►  raw games ─┐
 3. The **query server** (FastAPI) answers a read-only JSON API (`/api/moves`, `/api/games`,
    `/api/meta`, `/api/usernames`). 
 4. The **frontend** (Vite + TypeScript + chessground) calls that API and navigates positions by id.
+
+## Data model
+
+One `data/games.db` holds two layers. The **raw store** is the irreplaceable download; the
+**derived index** is regenerated from it (`index --rebuild`) and is what the server queries.
+
+**Raw store** (written by `download`):
+
+- **`games`** — one row per board, keyed by chess.com's `uuid`, so re-downloading or overlapping
+  players dedup for free. Holds only the fields the index consumes (players, ratings, results,
+  `url`, `time_control`, `end_time`) plus chess.com's compact `tcn` move encoding, decoded on the
+  fly at index time. No secondary indexes — it's only ever read by its `uuid` PK / rowid.
+- **`archives`** — the resume ledger, one row per `(username, year, month)`; `complete` months are
+  never re-fetched.
+
+**Derived index** (built by `index`, nothing pre-aggregated):
+
+- **`positions(id, fen, fen_hash)`** — every distinct position, keyed by a FEN without move
+  counters so transpositions merge. Across incremental runs a position is resolved by an indexed
+  8-byte `fen_hash` (verified against the FEN text on a hit), far smaller than indexing the
+  ~70-byte FEN itself.
+- **`moves(parent_id, move_id → child_id, san, from_sq, to_sq, drop_piece)`** — one edge per
+  distinct move out of a position: its SAN, origin/destination (or dropped piece), and the
+  resulting child position.
+- **`game_facts(parent_id, move_id, game_id, outcome, rating_sum)`** — the heart of the index, one
+  row per (game, position) the game reached, recording which move it played there. `outcome` and
+  `rating_sum` are denormalized so the common unfiltered query aggregates win/draw/loss and applies
+  the rating filter with no join. References a dense integer `game_id`, not the 36-byte `uuid`.
+- **`games_meta(game_id, uuid, white/black username + rating, outcome, url, time_control,
+  end_time)`** — a compact per-game row the server returns in the games panel and joins to only
+  when filtering by username.
+
+`meta(key, value)` is shared: the raw layer stores `schema_version`; the index stores `max_ply`
+and `root_id` (the start position's id).
 
 ## Quickstart
 
@@ -128,8 +163,8 @@ position chess.com recorded), decode the `tcn` format, and check incremental ind
 
 chess.com bughouse records carry no PGN (moves come only from the decoded `tcn` field), and the API
 returns each of the two boards as a separate record with no field linking the pair. This project
-works within those constraints: the raw `tcn` is preserved alongside the decoded moves, and the
-explorer treats each board as a standalone single-board game.
+works within those constraints: the raw `tcn` is the only move record kept (decoded on demand when
+indexing), and the explorer treats each board as a standalone single-board game.
 
 ## Possible future features
 
