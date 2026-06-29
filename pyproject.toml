@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "bughouse-explorer"
 version = "0.1.0"
-description = "Index downloaded chess.com bughouse games into a single-board opening explorer graph."
+description = "Download chess.com bughouse games and explore their openings — one tool, one database."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "AGPL-3.0-or-later" }
@@ -13,17 +13,21 @@ classifiers = ["License :: OSI Approved :: GNU Affero General Public License v3 
 dependencies = [
     "fastapi>=0.110",
     "uvicorn>=0.29",
+    "requests>=2.28",
+    "rich>=13.0",
+    "click>=8.1",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0"]
 
 [project.scripts]
-bughouse-explorer-index = "bughouse_explorer.indexer:main"
+bughouse-explorer = "bughouse_explorer.cli:main"
+# Kept as a convenience alias for `bughouse-explorer serve` (used by start-server.sh / the web UI).
 bughouse-explorer-serve = "bughouse_explorer.server:main"
 
 [project.urls]
-Repository = "https://github.com/Oh-My-Lands/bughouse-opening-toolkit"
+Repository = "https://github.com/Oh-My-Lands/bughouse-opening-explorer"
 
 [tool.setuptools.packages.find]
 include = ["bughouse_explorer*"]

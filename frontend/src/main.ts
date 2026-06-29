@@ -147,6 +147,14 @@ function flip(): void {
   render();
 }
 
+// True if the event target is an editable field, so letter shortcuts don't fire while typing.
+function isTyping(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || el.isContentEditable;
+}
+
 // Wire the minimum-rating slider and its live readout. Also fetch meta once so renderMoves's
 // empty-state message (max_ply / min_games) has data to show.
 async function setupRatingFilter(): Promise<void> {
@@ -223,6 +231,9 @@ async function main(): Promise<void> {
   document.addEventListener("keydown", (e) => {
     if (e.key === "ArrowLeft") back();
     else if (e.key === "ArrowRight") forward();
+    // Letter shortcuts: ignore while typing in a text field (e.g. the username filter).
+    else if (e.key === "f" && !isTyping(e.target)) flip();
+    else if (e.key === "r" && !isTyping(e.target)) reset();
   });
 
   try {

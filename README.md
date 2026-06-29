@@ -1,65 +1,140 @@
-# Bughouse Opening Toolkit
+# Bughouse Opening Explorer
 
-A two-part toolkit for studying **chess.com bughouse** openings: download a player's games, index
-them into a position graph, and browse openings — with frequency and win-rate stats — in a
-**single-board** explorer (like the lichess crazyhouse explorer, but with no pocket; dropped pieces
-just appear on their square).
+A tool for studying bughouse openings: download a player's games from chess.com,
+index them into a position graph, and browse openings in a
+**single-board**. You drill into positions and, for each continuation, see how
+many games played it and the win split.
+
+One self-contained Python package (`bughouse_explorer`) does everything — **download**, **index**,
+and **serve** — writing to **one SQLite database**.
 
 ## The pipeline
 
 ```
-chess.com API ──[ downloader ]──► games.db ──[ explorer indexer ]──► explorer.db ──[ query server ]──► browser GUI
+chess.com  ──(download)──►  raw games ─┐
+                                       ├─ one data/games.db ──(query server)──► browser GUI
+                     (index)──► graph ─┘
 ```
 
-1. **[`downloader/`](downloader/)** — a CLI (`bughouse-dl`) that walks a player's monthly archives on
-   chess.com's public Published-Data API, keeps the bughouse games, decodes their `tcn` move encoding,
-   and stores them in a local SQLite **`games.db`**.
-2. **[`explorer/`](explorer/)** — an indexer (`bughouse-explorer-index`) that replays each game on a
-   single-board engine and builds **`explorer.db`** (a position graph), plus a FastAPI query server
-   (`bughouse-explorer-serve`) and a Vite/TypeScript/chessground frontend that browses it.
-
-The downloader and explorer are independent Python packages that share no code — the only thing passing between
-them is the `games.db` file, which the indexer reads via `--games-db`.
+1. **download** walks a player's monthly archives on chess.com's public Published-Data API, keeps
+   the bughouse games, decodes their `tcn` move encoding, and upserts them into the `games` table.
+   It is resumable (a per-month ledger) and dedups across players by game `uuid`.
+2. **index** replays each game's moves on a single-board engine, keying positions by FEN so
+   transpositions merge, and writes a per-game **facts** graph (`positions`/`moves`/`game_facts`/
+   `games_meta`) into the same file. Nothing is pre-aggregated — every statistic is computed at
+   query time. Indexing is **incremental**: only games not yet in the index are processed, so
+   updates stay fast even as the collection grows past a million games.
+3. The **query server** (FastAPI) answers a read-only JSON API (`/api/moves`, `/api/games`,
+   `/api/meta`, `/api/usernames`). 
+4. The **frontend** (Vite + TypeScript + chessground) calls that API and navigates positions by id.
 
 ## Quickstart
 
-The two packages have disjoint dependencies, so install whichever half you need (or both):
-
 ```bash
-git clone <this-repo> bughouse && cd bughouse
+git clone https://github.com/Oh-My-Lands/bughouse-opening-explorer.git
+cd bughouse-opening-explorer
 python3 -m venv .venv && source .venv/bin/activate
-
-pip install -e downloader/      # the bughouse-dl scraper
-pip install -e explorer/        # the indexer + query server
+pip install -e .
 ```
 
-Then run the pipeline:
+Then run the three steps (all against one `--db`, default `data/games.db`):
 
 ```bash
-# 1. download a player's bughouse games into games.db
-bughouse-dl SomeUsername --db games.db
+# 1. download a player's bughouse games (repeat for more players; resumable)
+bughouse-explorer download SomeUsername
+#    options: --from YYYY/MM  --to YYYY/MM  --force-refresh  --db PATH
 
-# 2. build the opening index (run from explorer/)
-cd explorer
-bughouse-explorer-index --games-db ../downloader/games.db --out frontend/public/explorer.db
+# 2. build / update the opening index (incremental — only new games are processed)
+bughouse-explorer index
 
-# 3. serve it
-bughouse-explorer-serve --db frontend/public/explorer.db    # http://localhost:8000
+# 3. serve the explorer (web UI + JSON API on http://localhost:8000)
+bughouse-explorer serve
 ```
 
-See **[downloader/README.md](downloader/README.md)** and **[explorer/README.md](explorer/README.md)**
-for the full details, options, and the dev workflow (Vite dev server + API proxy).
+`bughouse-explorer update SomeUsername` does steps 1–2 in at once.
 
-> **The databases are generated, not shipped.** `games.db` (~2 GB) and `explorer.db` (~4 GB) are built
-> by running the pipeline above and are deliberately **not** committed to this repository — regenerate
-> them locally.
+## Indexing depth and rebuilds
 
-## Bughouse contraints
+`--max-ply N` (default **40**) bounds how deep the index records each game. It is fixed once the
+index exists; to change it, rebuild the whole index from the raw games (the raw games are kept, so
+this needs no re-download):
+
+```bash
+bughouse-explorer index --max-ply 30 --rebuild
+```
+
+Everything else (rating, min-games, username) is a live query parameter — you never rebuild to
+change a filter.
+
+## Filters (live, no rebuild)
+
+- **Mean rating ≥** — a slider; only games whose two players average at or above the threshold count.
+- **Min games** — a slider (1–10, default 5); continuations played in fewer games are hidden.
+- **White / Black username** — typeahead comboboxes; filter to a seat, or both for an exact pairing.
+  Clicking a player's name in the games panel commits it to that seat's filter.
+
+## Run the GUI
+
+Two local processes during development: the query server and the Vite dev server.
+
+```bash
+# 1. query server (with the venv active)
+bughouse-explorer serve            # serves http://localhost:8000
+
+# 2. frontend dev server (in another shell)
+cd frontend
+npm install
+npm run dev        # http://localhost:5173, proxies /api -> :8000
+```
+
+Open http://localhost:5173. The board starts at the initial position; click a continuation row (or
+drag a piece for normal moves) to drill in. Drops are played by clicking their row (no pocket to
+drag from). Back / forward / arrow keys navigate; the move list and games panel update with the
+position.
+
+For a **single-process** run, `npm run build` then `bughouse-explorer serve` — it mounts the built
+`frontend/dist` alongside the API on one port (http://localhost:8000). (`bughouse-explorer-serve`
+is kept as an alias for `bughouse-explorer serve`.)
+
+## Layout
+
+```
+bughouse-opening-explorer/
+  bughouse_explorer/
+    api.py        # chess.com Published-Data API client
+    tcn.py        # decode chess.com's tcn move encoding (drops, promotions)
+    download.py   # walk a player's archives, keep bughouse games, upsert into the raw store
+    engine.py     # single-board move applier -> FEN + SAN (handles drops, castling, ep, promotion)
+    indexer.py    # incremental position-graph index built from the raw games (same db file)
+    db.py         # unified schema + write helpers (raw store + index)
+    server.py     # FastAPI query server
+    cli.py        # bughouse-explorer download / index / serve / update
+  frontend/
+    src/{main,db,explorer,combobox}.ts · src/styles.css · index.html
+  tests/          # test_engine.py · test_tcn.py · test_indexer.py
+  data/           # generated database lives here (gitignored)
+```
+
+## Tests
+
+```bash
+pytest
+```
+
+The tests replay real games' full move lists (asserting the engine reproduces the exact final
+position chess.com recorded), decode the `tcn` format, and check incremental indexing.
+
+## Bughouse constraints
+
 chess.com bughouse records carry no PGN (moves come only from the decoded `tcn` field), and the API
-returns each of the two boards as a separate record with no field linking the pair. This toolkit works
-within those constraints: the downloader preserves the raw `tcn` alongside the decoded moves, and the
+returns each of the two boards as a separate record with no field linking the pair. This project
+works within those constraints: the raw `tcn` is preserved alongside the decoded moves, and the
 explorer treats each board as a standalone single-board game.
+
+## Possible future features
+
+More filters (time-class / date / color), reconstructing the two boards of a game, engine eval.
 
 ## License
 
-[AGPL-3.0](LICENSE). 
+[AGPL-3.0](LICENSE).

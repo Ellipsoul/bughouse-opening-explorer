@@ -115,16 +115,20 @@ def create_app(db_path):
     return app
 
 
+def serve(db_path="data/games.db", host="127.0.0.1", port=8000):
+    """Run the query server against the unified database (blocking)."""
+    import uvicorn
+
+    uvicorn.run(create_app(db_path), host=host, port=port)
+
+
 def main(argv=None):
-    p = argparse.ArgumentParser(description="Serve explorer.db over a local JSON API.")
-    p.add_argument("--db", default="frontend/public/explorer.db", help="Path to explorer.db.")
+    p = argparse.ArgumentParser(description="Serve the bughouse database over a local JSON API.")
+    p.add_argument("--db", default="data/games.db", help="Path to the bughouse database.")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8000)
     args = p.parse_args(argv)
-
-    import uvicorn
-
-    uvicorn.run(create_app(args.db), host=args.host, port=args.port)
+    serve(args.db, args.host, args.port)
 
 
 if __name__ == "__main__":

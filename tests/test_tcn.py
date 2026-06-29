@@ -5,9 +5,9 @@ import pathlib
 
 import pytest
 
-from bughouse_dl.tcn import decode_tcn
+from bughouse_explorer.tcn import decode_tcn
 
-FIXTURES = pathlib.Path(__file__).parent / "fixtures" / "sample_games.json"
+FIXTURES = pathlib.Path(__file__).parent / "fixtures" / "sample_tcn.json"
 FILES = set("abcdefgh")
 RANKS = set("12345678")
 PIECES = set("qnrbkp")

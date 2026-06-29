@@ -15,7 +15,7 @@ import time
 import requests
 
 BASE = "https://api.chess.com/pub"
-USER_AGENT = "bughouse-downloader/0.1 (https://github.com/Oh-My-Lands/bughouse-opening-toolkit)"
+USER_AGENT = "bughouse-explorer/0.1 (https://github.com/Oh-My-Lands/bughouse-opening-explorer)"
 
 
 class ApiError(RuntimeError):
