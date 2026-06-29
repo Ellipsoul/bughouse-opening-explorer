@@ -5,7 +5,9 @@ One SQLite file now holds both layers of the pipeline:
 * **Raw store** (written by ``download``): ``games`` — one row per board, keyed by chess.com's
   ``uuid`` (so downloading several usernames dedups shared games for free) — and ``archives``,
   the resume ledger (one row per ``(username, year, month)``; ``complete`` months are never
-  re-fetched).
+  re-fetched). ``games`` keeps only the fields the index actually consumes plus chess.com's
+  compact ``tcn`` move encoding; the indexer decodes ``tcn`` on the fly (no redundant decoded
+  copy is stored). Which months a player has are tracked in ``archives``, not on ``games``.
 * **Derived index** (written by ``index``): ``positions``, ``moves``, ``game_facts``,
   ``games_meta`` — the per-game position graph the query server aggregates live. ``index`` reads
   ``games`` from the same file, so there is no separate ``games.db``.
@@ -15,46 +17,53 @@ stores ``max_ply`` and ``root_id``. The keys never collide.
 
 Why the two extra indexes vs. the old standalone explorer.db:
 
-* ``idx_positions_fen`` — incremental indexing must look up a position by FEN across runs (the
+* ``idx_positions_fen_hash`` — incremental indexing must look up a position across runs (the
   full-rebuild indexer kept the whole ``fen -> id`` map in RAM and never needed an on-disk index).
+  We index an 8-byte :func:`fen_hash` rather than the ~70-byte FEN text — a ~6x smaller index —
+  and verify the FEN on the (vanishingly rare) hash hit.
 * ``idx_games_meta_uuid`` — to find which raw ``games`` have not been indexed yet.
 """
 
-import json
+import hashlib
 import os
 import sqlite3
 import time
 
-# Bumped from "1": the raw store and the derived index now coexist in one file.
-SCHEMA_VERSION = "2"
+# Bumped from "3": positions resolves a FEN by an indexed 8-byte hash (idx_positions_fen_hash)
+# instead of a UNIQUE index over the full FEN text. ("3" itself trimmed the raw ``games`` table.)
+SCHEMA_VERSION = "4"
+
+
+def fen_hash(fen):
+    """Stable 64-bit signed hash of a position FEN — the on-disk position lookup key.
+
+    Must be deterministic across processes (unlike the salted built-in ``hash``) so an incremental
+    build can find positions written by an earlier run. Collisions are astronomically unlikely over
+    ~21M positions and harmless anyway: the indexer verifies the FEN text on every hash hit.
+    """
+    return int.from_bytes(
+        hashlib.blake2b(fen.encode(), digest_size=8).digest(), "big", signed=True
+    )
 
 # --- raw store (downloaded games + resume ledger) --------------------------
+# ``games`` carries only what the downloader needs to dedup (uuid) and what the indexer reads:
+# the player/result/rating fields, the few columns copied into games_meta (url, time_control,
+# end_time), and chess.com's compact ``tcn`` move encoding (decoded on the fly when indexing).
+# No indexes: nothing queries this table by anything but its uuid PK / rowid.
 _RAW_SCHEMA = """
 CREATE TABLE IF NOT EXISTS games (
     uuid           TEXT PRIMARY KEY,
-    source_username TEXT,
-    year           INTEGER,
-    month          INTEGER,
     end_time       INTEGER,
     time_control   TEXT,
-    time_class     TEXT,
-    rated          INTEGER,
     white_username TEXT,
     white_rating   INTEGER,
     white_result   TEXT,
     black_username TEXT,
     black_rating   INTEGER,
     black_result   TEXT,
-    eco            TEXT,
-    initial_setup  TEXT,
-    fen            TEXT,
     tcn            TEXT,
-    moves_json     TEXT,
     url            TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_games_end_time ON games(end_time);
-CREATE INDEX IF NOT EXISTS idx_games_white ON games(white_username);
-CREATE INDEX IF NOT EXISTS idx_games_black ON games(black_username);
 
 CREATE TABLE IF NOT EXISTS archives (
     username   TEXT,
@@ -70,12 +79,16 @@ CREATE TABLE IF NOT EXISTS archives (
 # --- derived index (position graph) ----------------------------------------
 _INDEX_SCHEMA = """
 CREATE TABLE IF NOT EXISTS positions (
-    id  INTEGER PRIMARY KEY,
-    fen TEXT NOT NULL
+    id       INTEGER PRIMARY KEY,
+    fen      TEXT    NOT NULL,
+    fen_hash INTEGER NOT NULL   -- db.fen_hash(fen); the across-run lookup key (see below)
 );
 -- Lets an incremental run resolve an existing position by FEN (the in-memory fen->id cache only
--- holds positions touched in the current run). Unique because the indexer never emits a FEN twice.
-CREATE UNIQUE INDEX IF NOT EXISTS idx_positions_fen ON positions(fen);
+-- holds positions touched in the current run) without indexing the full ~70-byte FEN string: we
+-- index the 8-byte hash and verify the FEN text on a hit. NOT unique -- hash collisions are
+-- allowed; FEN uniqueness is upheld by the indexer (its id cache + verified lookup never insert a
+-- FEN twice), not by this index.
+CREATE INDEX IF NOT EXISTS idx_positions_fen_hash ON positions(fen_hash);
 
 CREATE TABLE IF NOT EXISTS moves (
     parent_id  INTEGER NOT NULL,
@@ -128,10 +141,10 @@ CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 INDEX_TABLES = ["game_facts", "games_meta", "moves", "positions"]
 
 _GAME_COLUMNS = [
-    "uuid", "source_username", "year", "month", "end_time", "time_control",
-    "time_class", "rated", "white_username", "white_rating", "white_result",
-    "black_username", "black_rating", "black_result", "eco", "initial_setup",
-    "fen", "tcn", "moves_json", "url",
+    "uuid", "end_time", "time_control",
+    "white_username", "white_rating", "white_result",
+    "black_username", "black_rating", "black_result",
+    "tcn", "url",
 ]
 
 MOVE_COLUMNS = ["parent_id", "move_id", "san", "from_sq", "to_sq", "drop_piece", "child_id"]
@@ -184,30 +197,25 @@ def completed_months(conn, username):
     return {(r["year"], r["month"]) for r in rows}
 
 
-def game_row(game, source_username, year, month, moves):
-    """Flatten a chess.com game record into a tuple matching ``_GAME_COLUMNS``."""
+def game_row(game):
+    """Flatten a chess.com game record into a tuple matching ``_GAME_COLUMNS``.
+
+    Stores chess.com's ``tcn`` verbatim; the indexer decodes it when replaying the game, so no
+    separate decoded move list is kept.
+    """
     white = game.get("white", {})
     black = game.get("black", {})
     return (
         game["uuid"],
-        source_username,
-        year,
-        month,
         game.get("end_time"),
         game.get("time_control"),
-        game.get("time_class"),
-        1 if game.get("rated") else 0,
         white.get("username"),
         white.get("rating"),
         white.get("result"),
         black.get("username"),
         black.get("rating"),
         black.get("result"),
-        game.get("eco"),
-        game.get("initial_setup"),
-        game.get("fen"),
         game.get("tcn"),
-        json.dumps(moves, separators=(",", ":")),
         game.get("url"),
     )
 
@@ -235,8 +243,10 @@ def save_month(conn, username, year, month, rows, status="complete"):
 
 # --- derived index: batched writers (called by the indexer) ----------------
 
-def write_positions(conn, rows):  # rows: (id, fen)
-    conn.executemany("INSERT OR REPLACE INTO positions (id, fen) VALUES (?, ?)", rows)
+def write_positions(conn, rows):  # rows: (id, fen, fen_hash)
+    conn.executemany(
+        "INSERT OR REPLACE INTO positions (id, fen, fen_hash) VALUES (?, ?, ?)", rows
+    )
 
 
 def write_moves(conn, rows):

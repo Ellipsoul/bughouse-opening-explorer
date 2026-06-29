@@ -15,19 +15,13 @@ from rich.progress import (
 )
 
 from . import db
-from .tcn import decode_tcn
 
 BUGHOUSE = "bughouse"
 
 
-def _bughouse_rows(games, username, year, month):
-    rows = []
-    for game in games:
-        if game.get("rules") != BUGHOUSE:
-            continue
-        moves = decode_tcn(game.get("tcn", ""))
-        rows.append(db.game_row(game, username, year, month, moves))
-    return rows
+def _bughouse_rows(games):
+    # Store the raw record (incl. chess.com's tcn) as-is; the indexer decodes tcn when it replays.
+    return [db.game_row(game) for game in games if game.get("rules") == BUGHOUSE]
 
 
 def download(client, conn, username, since=None, until=None, force_refresh=False, console=None):
@@ -64,7 +58,7 @@ def download(client, conn, username, since=None, until=None, force_refresh=False
         for year, month in todo:
             progress.update(task, description=f"{username} {year}/{month:02d}")
             games = client.get_month_games(username, year, month)
-            rows = _bughouse_rows(games, username, year, month)
+            rows = _bughouse_rows(games)
             db.save_month(conn, username, year, month, rows)
             total_games += len(rows)
             progress.update(task, advance=1, games=total_games)

@@ -17,10 +17,9 @@ the whole build. With each batch fully materialized before it is processed, no r
 commit time, so the WAL is checkpoint-truncated after every flush and stays small.
 """
 
-import json
-
 from . import db
 from .engine import Board, label
+from .tcn import decode_tcn
 
 DRAW_CODES = {
     "repetition", "agreed", "stalemate", "insufficient", "50move",
@@ -130,15 +129,20 @@ def index(db_path, max_ply=40, rebuild=False, batch=50000, console=None):
         i = ids.get(fen)
         if i is not None:
             return i
+        h = db.fen_hash(fen)  # also stored on insert below, so compute once
         if lookup_disk:
-            row = conn.execute("SELECT id FROM positions WHERE fen = ?", (fen,)).fetchone()
-            if row is not None:
-                ids[fen] = row[0]
-                return row[0]
+            # Resolve by the indexed hash, then confirm the FEN text (guards against the rare
+            # hash collision). Usually one row comes back; loop costs nothing if zero.
+            for row_id, row_fen in conn.execute(
+                "SELECT id, fen FROM positions WHERE fen_hash = ?", (h,)
+            ):
+                if row_fen == fen:
+                    ids[fen] = row_id
+                    return row_id
         i = next_pos_id
         next_pos_id += 1
         ids[fen] = i
-        position_buf.append((i, fen))
+        position_buf.append((i, fen, h))
         return i
 
     def flush():
@@ -172,7 +176,9 @@ def index(db_path, max_ply=40, rebuild=False, batch=50000, console=None):
                 board = Board()
                 fen = board.position_key()
                 seen = set()  # positions already recorded for this game (dedup transpositions)
-                for move in json.loads(game["moves_json"])[:max_ply]:
+                # Each ply is exactly two tcn chars, so slicing the encoding decodes only the
+                # first max_ply plies (cheaper than decoding the whole game and then truncating).
+                for move in decode_tcn((game["tcn"] or "")[:max_ply * 2]):
                     parent_fen = fen
                     move_id, san = label(board, move)
                     from_sq, to_sq, drop_piece = move.get("from"), move["to"], move.get("drop")

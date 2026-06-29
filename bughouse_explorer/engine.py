@@ -10,8 +10,8 @@ Bughouse specifics:
   a square->piece map, so that is fine.
 - There is no pocket; drops are simply piece placements.
 
-Moves come from the downloader's ``moves_json``: each ply is ``{"from","to"}`` (optionally with
-``"promotion"``) or ``{"drop","to"}``.
+Moves come from ``tcn.decode_tcn`` (the indexer decodes each game's ``tcn`` field): each ply is
+``{"from","to"}`` (optionally with ``"promotion"``) or ``{"drop","to"}``.
 """
 
 FILES = "abcdefgh"
@@ -45,7 +45,7 @@ class Board:
     # -- move application ---------------------------------------------------
 
     def apply(self, move):
-        """Apply one ply given as a moves_json dict."""
+        """Apply one ply given as a decoded-tcn move dict."""
         if "drop" in move:
             self._apply_drop(move)
         else:

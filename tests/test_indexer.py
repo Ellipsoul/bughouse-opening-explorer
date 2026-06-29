@@ -1,19 +1,28 @@
 """Tests for incremental indexing: new games are appended, re-runs are idempotent, and an
 incremental build yields the same graph as a full rebuild (positions are shared across runs)."""
 
-import json
-
 from bughouse_explorer import db, indexer
+from bughouse_explorer.tcn import _T
+
+
+def _encode_tcn(moves):
+    """Inverse of ``decode_tcn`` for plain from/to moves — enough for these tests' fixtures.
+
+    A square's tcn index is ``(rank - 1) * 8 + file``; each ply is the two chars for from, to.
+    """
+    def idx(sq):
+        return (int(sq[1]) - 1) * 8 + "abcdefgh".index(sq[0])
+    return "".join(_T[idx(m["from"])] + _T[idx(m["to"])] for m in moves)
 
 
 def _insert_game(conn, uuid, moves, white_result="win", black_result="resigned",
                  white="alice", black="bob", wr=1600, br=1500):
     conn.execute(
         "INSERT INTO games (uuid, white_username, white_rating, white_result, "
-        "black_username, black_rating, black_result, url, time_control, end_time, moves_json) "
+        "black_username, black_rating, black_result, url, time_control, end_time, tcn) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (uuid, white, wr, white_result, black, br, black_result,
-         f"https://chess.com/game/{uuid}", "180", 1700000000, json.dumps(moves)),
+         f"https://chess.com/game/{uuid}", "180", 1700000000, _encode_tcn(moves)),
     )
     conn.commit()
 
