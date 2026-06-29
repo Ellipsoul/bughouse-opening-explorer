@@ -12,7 +12,7 @@ and **serve** — writing to **one SQLite database**.
 
 ```
 chess.com  ──(download)──►  raw games ─┐
-                                       ├─ one data/games.db ──(query server)──► browser GUI
+                                       ├─ data/games.db ──(query server)──► browser GUI
                      (index)──► graph ─┘
 ```
 
