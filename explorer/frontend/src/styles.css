@@ -1,0 +1,266 @@
+:root {
+  --bg: #161512;
+  --panel: #262421;
+  --panel2: #2f2d2a;
+  --text: #d8d4cf;
+  --muted: #9a948c;
+  --accent: #629924;
+  --white-win: #e8e6e1;
+  --draw: #8a8784;
+  --black-win: #3a3835;
+  --line: #3d3a36;
+}
+
+* { box-sizing: border-box; }
+
+/* Exact lichess brown: light #f0d9b5 / dark #b58863. Overrides chessground.brown.css's lighter
+   20%-black-overlay dark squares (brown.css is imported earlier in main.ts, so this rule wins). */
+cg-board {
+  background-color: #f0d9b5;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 2 2' shape-rendering='crispEdges'%3E%3Crect width='2' height='2' fill='%23f0d9b5'/%3E%3Crect x='1' width='1' height='1' fill='%23b58863'/%3E%3Crect y='1' width='1' height='1' fill='%23b58863'/%3E%3C/svg%3E");
+  background-size: 25% 25%;
+}
+
+/* Board coordinates: lowercase file letters (chessground's base.css uppercases them) and move the
+   rank numbers to the right edge instead of the left. */
+.cg-wrap coords.files {
+  text-transform: lowercase;
+  left: 2px;
+  text-align: left;
+}
+.cg-wrap coords.ranks {
+  left: auto;
+  right: 4px;
+  align-items: flex-end;
+  text-align: right;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+}
+
+header {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--line);
+}
+header h1 { margin: 0; font-size: 18px; }
+header .sub { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
+
+main {
+  display: flex;
+  gap: 22px;
+  padding: 20px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.left { width: 440px; }
+.board {
+  width: 440px;
+  height: 440px;
+}
+
+.board-controls {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+.board-controls button {
+  flex: 1;
+  background: var(--panel2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 7px 4px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.board-controls button:hover { background: #3a3733; }
+
+.movelist {
+  margin-top: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 10px;
+  min-height: 38px;
+  line-height: 1.9;
+}
+.movelist .ply {
+  cursor: pointer;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+.movelist .ply:hover { background: var(--panel2); }
+.movelist .ply.current { background: var(--accent); color: #fff; }
+.movelist .hint, .movelist .empty { color: var(--muted); }
+
+.right { flex: 1; min-width: 360px; max-width: 560px; }
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.left h2 { font-size: 14px; margin: 16px 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+.filters { display: flex; align-items: center; gap: 16px; flex-wrap: nowrap; white-space: nowrap; }
+.slider-stack { display: flex; flex-direction: column; gap: 6px; }
+.rating-filter { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+.slider-stack .rating-filter span { min-width: 116px; }
+.rating-filter #rating-readout { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.rating-filter input[type="range"] {
+  width: 120px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.user-stack { display: flex; flex-direction: column; gap: 6px; }
+.user-filter { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+.user-filter .seat { min-width: 36px; }
+
+.combobox { position: relative; display: inline-flex; align-items: center; }
+.combobox-input {
+  width: 120px;
+  background: var(--panel2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 3px 20px 3px 6px;
+  font-size: 12px;
+}
+.combobox-input::placeholder { color: #6b6760; }
+.combobox-clear {
+  position: absolute;
+  right: 2px;
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 4px;
+  line-height: 1;
+}
+.combobox-clear:hover { color: var(--text); }
+.combobox-menu {
+  position: absolute;
+  top: calc(100% + 2px);
+  right: 0;
+  min-width: 100%;
+  max-width: 240px;
+  z-index: 20;
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  max-height: 280px;
+  overflow-y: auto;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+}
+.combobox-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 4px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.combobox-item.active,
+.combobox-item:hover { background: var(--accent); color: #fff; }
+.combobox-item .cb-name { overflow: hidden; text-overflow: ellipsis; }
+.combobox-item .cb-count { color: var(--muted); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.combobox-item.active .cb-count,
+.combobox-item:hover .cb-count { color: #e8f0dd; }
+
+.explorer {
+  margin-top: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.move-row {
+  display: grid;
+  grid-template-columns: 70px 70px 1fr;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+.move-row:last-child { border-bottom: none; }
+.move-row:hover { background: var(--panel2); }
+.move-san { font-weight: 600; }
+.move-count .games { font-variant-numeric: tabular-nums; }
+.move-count .share { font-size: 11px; color: var(--muted); }
+
+.winbar {
+  display: flex;
+  height: 20px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--draw);
+}
+.winbar span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  line-height: 20px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.winbar .w { background: var(--white-win); color: #2a2926; }
+.winbar .d { background: var(--draw); color: #1f1e1c; }
+.winbar .b { background: var(--black-win); color: #cfccc6; flex: 1; }
+
+.empty { color: var(--muted); padding: 10px 12px; margin: 0; }
+
+#games {
+  margin-bottom: 24px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.game-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.game-row:last-child { border-bottom: none; }
+.players { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.player {
+  background: none;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+.player:hover { background: var(--panel); color: var(--accent); }
+.player small { color: var(--muted); }
+.game-row .result {
+  color: var(--muted);
+  text-decoration: none;
+  font-variant-numeric: tabular-nums;
+  padding-left: 8px;
+  white-space: nowrap;
+}
+.game-row .result:hover { color: var(--text); }
+
+.loading {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  padding: 8px 14px;
+  border-radius: 4px;
+  color: var(--muted);
+}

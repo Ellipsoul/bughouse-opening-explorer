@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>♟</text></svg>" />
+    <title>Bughouse Opening Explorer</title>
+  </head>
+  <body>
+    <header>
+      <h1>Bughouse Opening Explorer</h1>
+    </header>
+    <main>
+      <section class="left">
+        <div id="board" class="board"></div>
+        <div class="board-controls">
+          <button id="back" title="Back (←)">◀ Back</button>
+          <button id="forward" title="Forward (→)">Forward ▶</button>
+          <button id="reset" title="Go to start">⟲ Start</button>
+          <button id="flip" title="Flip board">⇅ Flip</button>
+        </div>
+        <div id="movelist" class="movelist"></div>
+        <h2>Games at this position</h2>
+        <div id="games" class="games"></div>
+      </section>
+      <section class="right">
+        <div class="panel-head">
+          <div class="filters">
+            <div class="slider-stack">
+              <label class="rating-filter">
+                <span id="rating-readout">Mean rating ≥ 1000</span>
+                <input type="range" id="rating-min" min="1000" max="3000" step="50" value="1000" />
+              </label>
+              <label class="rating-filter">
+                <span id="min-games-readout">Min games 5</span>
+                <input type="range" id="min-games" min="1" max="10" step="1" value="5" />
+              </label>
+            </div>
+            <div class="user-stack">
+              <span class="user-filter">
+                <span class="seat">White</span>
+                <span id="white-combobox" class="combobox">
+                  <input class="combobox-input" placeholder="username" autocomplete="off" />
+                  <button class="combobox-clear" type="button" hidden>✕</button>
+                  <ul class="combobox-menu" hidden></ul>
+                </span>
+              </span>
+              <span class="user-filter">
+                <span class="seat">Black</span>
+                <span id="black-combobox" class="combobox">
+                  <input class="combobox-input" placeholder="username" autocomplete="off" />
+                  <button class="combobox-clear" type="button" hidden>✕</button>
+                  <ul class="combobox-menu" hidden></ul>
+                </span>
+              </span>
+            </div>
+          </div>
+        </div>
+        <div id="explorer" class="explorer"></div>
+      </section>
+    </main>
+    <div id="loading" class="loading">Loading database…</div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
