@@ -19,6 +19,15 @@
           <button id="reset" title="Go to start (r)">⟲ Reset</button>
           <button id="flip" title="Flip board (f)">⇅ Flip</button>
         </div>
+        <div class="fen-input">
+          <input
+            id="fen-input"
+            type="text"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <span id="fen-error" class="fen-error" hidden></span>
+        </div>
         <div id="movelist" class="movelist"></div>
         <h2>Games at this position</h2>
         <div id="games" class="games"></div>

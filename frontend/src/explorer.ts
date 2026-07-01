@@ -8,6 +8,10 @@ export interface Node {
   fen: string;
   san: string | null;
   lastMove?: string[];
+  // Half-moves played before this position (0 for the game start). Only meaningful on the first node
+  // of a line: after a FEN jump it seeds correct move numbering, since the FEN gives us the move
+  // number and side-to-move even though the moves that reached it are unknown.
+  ply?: number;
 }
 
 function pct(x: number, n: number): number {
@@ -64,13 +68,27 @@ export function renderMoveList(
   onJump: (index: number) => void
 ): void {
   el.innerHTML = "";
+  // Number/colour each ply from its absolute half-move index (basePly + i) rather than the array
+  // index, so a line that starts from a jumped FEN is numbered from that position's real move number
+  // (e.g. "15... Nc6") instead of restarting at 1.
+  const basePly = path[0]?.ply ?? 0;
+  if (basePly > 0) {
+    const hint = document.createElement("span");
+    hint.className = "ply-hint";
+    hint.textContent = "…";
+    hint.title = "Line started from a pasted position — the earlier moves aren't known";
+    el.appendChild(hint);
+  }
   path.forEach((node, i) => {
-    if (i === 0) return; // root has no move
-    const moveNo = Math.ceil(i / 2);
-    const isWhite = i % 2 === 1;
+    if (i === 0) return; // starting node has no move leading into it
+    const p = basePly + i; // absolute half-move number of the move into this node
+    const isWhite = p % 2 === 1;
+    const moveNo = Math.ceil(p / 2);
     const span = document.createElement("span");
     span.className = "ply" + (i === cursor ? " current" : "");
-    span.textContent = (isWhite ? `${moveNo}. ` : "") + node.san;
+    // White: "3. Nf3"; Black: bare "Nc6", except a Black move opening the line gets "3... Nc6".
+    const prefix = isWhite ? `${moveNo}. ` : i === 1 ? `${moveNo}... ` : "";
+    span.textContent = prefix + node.san;
     span.addEventListener("click", () => onJump(i));
     el.appendChild(span);
   });

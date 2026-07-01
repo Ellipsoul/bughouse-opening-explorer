@@ -10,11 +10,14 @@ Filtering by username: ``white`` and/or ``black`` query params match the corresp
 """
 
 import argparse
+import re
 import sqlite3
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
+
+from . import db
 
 # Aggregate facts by move_id first (collapsing tens of thousands of games to a few dozen moves),
 # using the denormalized fact columns so games_meta is joined only when a username filter is set.
@@ -59,6 +62,65 @@ SELECT u, SUM(c) AS c FROM (
 """
 
 
+def normalize_fen(fen):
+    """Reduce a pasted FEN to the 4-field form positions are keyed by (see Board.position_key).
+
+    Positions store ``placement side castling ep`` with no half/full-move counters, so a standard
+    6-field FEN must be trimmed to its first four whitespace-separated tokens before lookup. A
+    crazyhouse/bughouse FEN also appends a pocket to the placement (e.g. ``...RNBQKBNR[QQpp]`` or
+    ``...RNBQKBNR[]``); positions here carry no holdings, so the ``[...]`` section is stripped.
+    """
+    tokens = fen.split()
+    if len(tokens) < 4:
+        raise HTTPException(status_code=400, detail="malformed FEN")
+    tokens = tokens[:4]
+    tokens[0] = re.sub(r"\[.*?\]", "", tokens[0])  # drop the crazyhouse/bughouse pocket
+    return " ".join(tokens)
+
+
+_FILES = "abcdefgh"
+
+
+def _placement_map(placement):
+    """Parse a FEN placement field into a {square: piece} dict, e.g. {'e4': 'P'}."""
+    board = {}
+    for i, row in enumerate(placement.split("/")):
+        rank = 8 - i
+        f = 0
+        for ch in row:
+            if ch.isdigit():
+                f += int(ch)
+            elif f < 8 and 1 <= rank <= 8:  # ignore anything that would run off the board
+                board[_FILES[f] + str(rank)] = ch
+                f += 1
+    return board
+
+
+def fen_lookup_keys(key):
+    """Yield the position keys to try for a pasted FEN, reconciling en-passant conventions.
+
+    The indexer records the en-passant target after *every* double pawn push (engine.py), but
+    lichess (and other strict exporters) only write the ep square when a capture is actually legal,
+    emitting ``-`` otherwise. So when a pasted FEN has ep ``-`` we also try the square a pawn would
+    have skipped (inferred from the placement); when it has a square we also try ``-``. The exact
+    key is tried first, so an unambiguous match always wins.
+    """
+    placement, side, castling, ep = key.split(" ")
+    yield key
+    if ep == "-":
+        board = _placement_map(placement)
+        if side == "b":  # white just moved: ep target on rank 3 behind a white pawn on rank 4
+            for f in _FILES:
+                if board.get(f + "4") == "P" and f + "3" not in board and f + "2" not in board:
+                    yield f"{placement} {side} {castling} {f}3"
+        else:            # black just moved: ep target on rank 6 behind a black pawn on rank 5
+            for f in _FILES:
+                if board.get(f + "5") == "p" and f + "6" not in board and f + "7" not in board:
+                    yield f"{placement} {side} {castling} {f}6"
+    else:
+        yield f"{placement} {side} {castling} -"
+
+
 def create_app(db_path):
     app = FastAPI(title="Bughouse Opening Explorer")
     conn = sqlite3.connect(db_path, check_same_thread=False)
@@ -101,6 +163,18 @@ def create_app(db_path):
                 where += " AND g.black_username = :black"
                 params["black"] = black
         return rows(MOVES_SQL.format(meta_join=meta_join, where=where), params)
+
+    @app.get("/api/position")
+    def position(fen: str):
+        # Resolve a FEN to its position id, mirroring the indexer's hash-then-verify lookup: probe
+        # the indexed fen_hash, then confirm the FEN text (hashes may collide). Several ep variants
+        # are tried (see fen_lookup_keys) so lichess-style FENs match. 404 if none are indexed.
+        for key in fen_lookup_keys(normalize_fen(fen)):
+            h = db.fen_hash(key)
+            for r in conn.execute("SELECT id, fen FROM positions WHERE fen_hash = ?", (h,)):
+                if r["fen"] == key:
+                    return {"id": r["id"], "fen": key}
+        raise HTTPException(status_code=404, detail="not_found")
 
     @app.get("/api/games")
     def games(pid: int, rmin: float = 0,

@@ -74,6 +74,18 @@ export function positionGames(
   });
 }
 
+// Resolve a FEN to its position node (id + the normalized 4-field FEN the server keys by), or null
+// if that position isn't in the indexed data. A dedicated fetch (not the api() helper) so the
+// expected 404 = "not found" case stays a null return instead of a thrown error.
+export async function lookupPosition(
+  fen: string
+): Promise<{ id: number; fen: string } | null> {
+  const res = await fetch(`/api/position?fen=${encodeURIComponent(fen)}`);
+  if (res.status === 404 || res.status === 400) return null;
+  if (!res.ok) throw new Error(`API position failed: ${res.status}`);
+  return res.json() as Promise<{ id: number; fen: string }>;
+}
+
 export interface UserOption {
   name: string;
   count: number;

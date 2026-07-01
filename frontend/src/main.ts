@@ -3,7 +3,8 @@ import { Api } from "chessground/api";
 import { Key } from "chessground/types";
 
 import {
-  positionMoves, positionGames, meta, usernames, Filters, START_FEN, MoveRow,
+  positionMoves, positionGames, meta, usernames, lookupPosition,
+  Filters, START_FEN, MoveRow,
 } from "./db";
 import { renderMoves, renderMoveList, renderGames, Node } from "./explorer";
 import { setupCombobox, ComboboxController } from "./combobox";
@@ -16,7 +17,7 @@ import "./styles.css";
 // The start position's id, fetched from meta.root_id at startup (the DB has no fen->id index, so
 // navigation is keyed by integer id; the root is the only node without a parent move to supply one).
 let rootId = 0;
-const rootNode = (): Node => ({ id: rootId, fen: START_FEN, san: null });
+const rootNode = (): Node => ({ id: rootId, fen: START_FEN, san: null, ply: 0 });
 
 let path: Node[] = [rootNode()];
 let cursor = 0;
@@ -147,6 +148,48 @@ function flip(): void {
   render();
 }
 
+// Jump straight to a pasted FEN: look up its position id and, on a hit, start a fresh line there
+// (same reset-then-render shape as reset()). A FEN not in the dataset leaves the board untouched.
+// Submitted on Enter or blur. lastFen holds the last *successfully* jumped-to FEN, so the blur that
+// follows an Enter submit is a no-op, but a failed lookup can be retried with the same text.
+let lastFen = "";
+async function goToFen(): Promise<void> {
+  const input = $("fen-input") as HTMLInputElement;
+  const error = $("fen-error");
+  const raw = input.value.trim();
+  if (!raw || raw === lastFen) return;
+  let hit: { id: number; fen: string } | null;
+  try {
+    hit = await lookupPosition(raw);
+  } catch (err) {
+    console.error(err);
+    // A fetch TypeError means the server is unreachable; anything else is an error status it returned.
+    error.textContent =
+      err instanceof TypeError
+        ? "Couldn't reach the server — is it running (and restarted)?"
+        : "Lookup failed (server error).";
+    error.hidden = false;
+    return;
+  }
+  if (!hit) {
+    error.textContent = "Position not in the dataset.";
+    error.hidden = false;
+    return;
+  }
+  error.hidden = true;
+  lastFen = raw;
+  input.blur(); // drop focus so the text caret stops blinking in the field
+  // Seed move numbering from the FEN: side-to-move (from the resolved position) + the fullmove
+  // counter in the pasted input give the position's real ply, even though its moves are unknown.
+  // A FEN without a fullmove field falls back to move 1 (nothing better is recoverable).
+  const side = hit.fen.split(" ")[1];
+  const fullmove = Number.parseInt(raw.split(/\s+/)[5] ?? "1", 10) || 1;
+  const ply = (fullmove - 1) * 2 + (side === "b" ? 1 : 0);
+  path = [{ id: hit.id, fen: hit.fen, san: null, ply }];
+  cursor = 0;
+  render();
+}
+
 // True if the event target is an editable field, so letter shortcuts don't fire while typing.
 function isTyping(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
@@ -228,6 +271,33 @@ async function main(): Promise<void> {
   $("forward").addEventListener("click", forward);
   $("reset").addEventListener("click", reset);
   $("flip").addEventListener("click", flip);
+  const fenEl = $("fen-input") as HTMLInputElement;
+  // Keep the FEN on a single line by shrinking the font until it fits the field's width.
+  const MAX_FONT = 12;
+  const MIN_FONT = 6;
+  const fitFont = () => {
+    fenEl.style.fontSize = `${MAX_FONT}px`;
+    let size = MAX_FONT;
+    while (size > MIN_FONT && fenEl.scrollWidth > fenEl.clientWidth) {
+      size -= 0.5;
+      fenEl.style.fontSize = `${size}px`;
+    }
+  };
+  fenEl.addEventListener("input", () => {
+    // Strip the crazyhouse/bughouse pocket ([] and its contents) from the field automatically.
+    const cleaned = fenEl.value.replace(/\[.*?\]/g, "");
+    if (cleaned !== fenEl.value) fenEl.value = cleaned;
+    fitFont();
+  });
+  fenEl.addEventListener("keydown", (e) => {
+    if ((e as KeyboardEvent).key === "Enter") {
+      e.preventDefault();
+      goToFen();
+    }
+  });
+  fenEl.addEventListener("blur", goToFen);
+  window.addEventListener("resize", fitFont);
+  fitFont(); // size correctly on load
   document.addEventListener("keydown", (e) => {
     if (e.key === "ArrowLeft") back();
     else if (e.key === "ArrowRight") forward();
