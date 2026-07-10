@@ -175,7 +175,11 @@ def index(db_path, max_ply=40, rebuild=False, batch=50000, console=None):
 
                 board = Board()
                 fen = board.position_key()
-                seen = set()  # positions already recorded for this game (dedup transpositions)
+                # (position, move) pairs already recorded for this game: a transposition replaying
+                # the same move is counted once, but a *different* move from a revisited position
+                # (possible when a game repeats a position) gets its own fact — otherwise the
+                # game's actual continuation would be invisible in the explorer.
+                seen = set()
                 # Each ply is exactly two tcn chars, so slicing the encoding decodes only the
                 # first max_ply plies (cheaper than decoding the whole game and then truncating).
                 for move in decode_tcn((game["tcn"] or "")[:max_ply * 2]):
@@ -186,8 +190,8 @@ def index(db_path, max_ply=40, rebuild=False, batch=50000, console=None):
                     fen = board.position_key()
                     parent_id, child_id = pid(parent_fen), pid(fen)
                     move_buf.append((parent_id, move_id, san, from_sq, to_sq, drop_piece, child_id))
-                    if parent_fen not in seen:
-                        seen.add(parent_fen)
+                    if (parent_fen, move_id) not in seen:
+                        seen.add((parent_fen, move_id))
                         fact_buf.append((parent_id, move_id, game_id, outcome, rating_sum))
                 game_id += 1
                 n_new += 1

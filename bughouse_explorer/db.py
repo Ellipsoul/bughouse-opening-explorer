@@ -108,7 +108,10 @@ CREATE TABLE IF NOT EXISTS game_facts (
     outcome         INTEGER NOT NULL,   -- denormalized from games_meta so the common (no-username)
                                         -- path can aggregate win/draw/loss without joining games_meta
     rating_sum      INTEGER NOT NULL,   -- white_rating + black_rating, for the rating filter
-    PRIMARY KEY (parent_id, game_id),
+    -- One fact per (position, move) a game played: a game that revisits a position (repetition)
+    -- and plays a different move from it contributes one fact per distinct move, so every
+    -- continuation actually played stays visible in the explorer.
+    PRIMARY KEY (parent_id, move_id, game_id),
     CHECK (outcome IN (0, 1, 2))
 );
 

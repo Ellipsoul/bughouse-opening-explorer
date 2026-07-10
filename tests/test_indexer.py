@@ -31,6 +31,16 @@ def _insert_game(conn, uuid, moves, white_result="win", black_result="resigned",
 GAME_A = [{"from": "e2", "to": "e4"}, {"from": "e7", "to": "e5"}]   # 1.e4 e5
 GAME_B = [{"from": "e2", "to": "e4"}, {"from": "c7", "to": "c5"}]   # 1.e4 c5
 
+# A game that returns to the start position and plays a different move from it the second time
+# (1.Nf3 Nf6 2.Ng1 Ng8 3.e4). Both moves actually played from the repeated position must get a
+# fact, or the game's real continuation is invisible in the explorer — which then railroads
+# navigation around the repetition loop and falsely reports the line drawn by repetition.
+GAME_LOOP = [
+    {"from": "g1", "to": "f3"}, {"from": "g8", "to": "f6"},
+    {"from": "f3", "to": "g1"}, {"from": "f6", "to": "g8"},
+    {"from": "e2", "to": "e4"},
+]
+
 
 def _counts(db_path):
     conn = db.connect(db_path)
@@ -65,6 +75,25 @@ def test_incremental_append_and_idempotency(tmp_path):
     s3 = indexer.index(path)
     assert s3["new_games"] == 0
     assert _counts(path) == {"positions": 4, "moves": 3, "game_facts": 4, "games_meta": 2}
+
+
+def test_revisited_position_records_each_distinct_move(tmp_path):
+    path = str(tmp_path / "t.db")
+    conn = db.connect(path)
+    _insert_game(conn, "L", GAME_LOOP)
+    conn.close()
+    indexer.index(path)
+
+    conn = db.connect(path)
+    root = int(conn.execute("SELECT value FROM meta WHERE key = 'root_id'").fetchone()[0])
+    root_moves = {r[0] for r in conn.execute(
+        "SELECT move_id FROM game_facts WHERE parent_id = ?", (root,))}
+    # Both first-move choices from the (revisited) start position are recorded...
+    assert root_moves == {"g1f3", "e2e4"}
+    # ...while a move replayed from the same position still counts once: 5 plies from 5 distinct
+    # (position, move) pairs -> 5 facts.
+    assert conn.execute("SELECT COUNT(*) FROM game_facts").fetchone()[0] == 5
+    conn.close()
 
 
 def test_root_and_meta(tmp_path):
