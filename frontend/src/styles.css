@@ -99,6 +99,8 @@ main {
   text-overflow: ellipsis;
 }
 .fen-input .fen-error { display: block; margin-top: 4px; color: #d98c5f; font-size: 12px; }
+/* The class rule above outranks the UA [hidden] rule, so restate display:none when hidden. */
+.fen-input .fen-error[hidden] { display: none; }
 
 .movelist {
   margin-top: 12px;
@@ -118,6 +120,43 @@ main {
 .movelist .ply.current { background: var(--accent); color: #fff; }
 .movelist .hint, .movelist .empty { color: var(--muted); }
 .movelist .ply-hint { color: var(--muted); margin-right: 4px; cursor: default; }
+.movelist .ply-draw {
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--panel2);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  cursor: default;
+}
+/* Variation blocks: indented, smaller and dimmer than the mainline. Nested variations sit inside
+   their parent block, so each level of nesting indents another step automatically. */
+.movelist .variation {
+  margin-left: 16px;
+  font-size: 0.88em;
+  line-height: 1.8;
+  color: var(--muted);
+}
+.movelist .variation .ply.current { color: #fff; }
+.movelist .paren { color: var(--muted); cursor: default; }
+
+.movelist-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+.movelist-actions button {
+  flex: 1;
+  background: var(--panel2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 5px 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.movelist-actions button:hover:not(:disabled) { background: #3a3733; }
+.movelist-actions button:disabled { opacity: 0.45; cursor: default; }
 
 .right { flex: 1; min-width: 360px; max-width: 560px; }
 .panel-head {
@@ -238,6 +277,24 @@ main {
 .winbar .b { background: var(--black-win); color: #cfccc6; flex: 1; }
 
 .empty { color: var(--muted); padding: 10px 12px; margin: 0; }
+
+/* Threefold repetition reached: the line is drawn and forward moves are suppressed. */
+.terminal {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 12px;
+}
+.terminal-badge {
+  flex-shrink: 0;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: var(--draw);
+  color: #1f1e1c;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.terminal-body strong { display: block; }
 
 #games {
   margin-bottom: 24px;

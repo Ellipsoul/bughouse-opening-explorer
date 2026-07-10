@@ -67,14 +67,16 @@ def normalize_fen(fen):
 
     Positions store ``placement side castling ep`` with no half/full-move counters, so a standard
     6-field FEN must be trimmed to its first four whitespace-separated tokens before lookup. A
-    crazyhouse/bughouse FEN also appends a pocket to the placement (e.g. ``...RNBQKBNR[QQpp]`` or
-    ``...RNBQKBNR[]``); positions here carry no holdings, so the ``[...]`` section is stripped.
+    crazyhouse/bughouse FEN also appends a pocket to the placement, either bracketed (e.g.
+    ``...RNBQKBNR[QQpp]``) or as a ninth ``/``-delimited segment (e.g. ``...RNBQKBNR/QQpp``);
+    positions here carry no holdings, so both forms are stripped.
     """
     tokens = fen.split()
     if len(tokens) < 4:
         raise HTTPException(status_code=400, detail="malformed FEN")
     tokens = tokens[:4]
     tokens[0] = re.sub(r"\[.*?\]", "", tokens[0])  # drop the crazyhouse/bughouse pocket
+    tokens[0] = "/".join(tokens[0].split("/")[:8])  # drop bughouse holdings (9th slash segment)
     return " ".join(tokens)
 
 
