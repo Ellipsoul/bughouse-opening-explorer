@@ -60,3 +60,24 @@ On a fresh Ubuntu/Fedora server (examples use Fedora `dnf`):
   `chown bughouse:bughouse` it. Restart the service afterward.
 
 After replacing the database, `systemctl restart bughouse` to clear the in-process query caches.
+
+## Visitor stats
+
+Caddy writes a durable JSON access log to `/var/log/caddy/access.log` (rotated by Caddy itself,
+~1 year retained). The `log` block in `Caddyfile` strips the variable-order `headers`/`tls`/
+`resp_headers` fields so the log is a stable shape GoAccess can parse. GoAccess config lives at
+`deploy/goaccess.conf` → `/etc/goaccess-bughouse.conf`.
+
+View stats with the `site-stats` helper (`deploy/site-stats.sh` → `/usr/local/bin/site-stats`):
+
+```sh
+site-stats          # write /var/log/caddy/report.html (all history, incl. rotated logs)
+site-stats --live   # interactive terminal dashboard (current log)
+```
+
+The report contains visitor IPs, so it is not served publicly. Copy it down to view:
+
+```sh
+scp root@<server>:/var/log/caddy/report.html . && xdg-open report.html
+```
+

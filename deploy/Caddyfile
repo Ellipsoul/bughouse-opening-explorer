@@ -1,4 +1,26 @@
 explorer.josephw.me {
 	encode zstd gzip
+	# Vite emits content-hashed asset filenames, so they can be cached forever (a new build gets a
+	# new name). index.html is not under /assets and stays uncached, so deploys take effect at once.
+	@assets path /assets/*
+	header @assets Cache-Control "public, max-age=31536000, immutable"
+	# Durable JSON access log (Caddy rotates it itself). Analyzed with GoAccess via site-stats.sh.
+	# The variable-order headers/tls/resp_headers objects are stripped so the log is a stable,
+	# simple JSON shape that GoAccess's positional parser can read reliably.
+	log {
+		format filter {
+			wrap json
+			fields {
+				request>headers delete
+				request>tls delete
+				resp_headers delete
+			}
+		}
+		output file /var/log/caddy/access.log {
+			roll_size 20MiB
+			roll_keep 12
+			roll_keep_for 8760h
+		}
+	}
 	reverse_proxy 127.0.0.1:8000
 }
