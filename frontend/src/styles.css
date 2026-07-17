@@ -25,12 +25,12 @@ cg-board {
    rank numbers to the right edge instead of the left. */
 .cg-wrap coords.files {
   text-transform: lowercase;
-  left: 2px;
+  left: 3px;
   text-align: left;
 }
 .cg-wrap coords.ranks {
   left: auto;
-  right: 4px;
+  right: 6px;
   align-items: flex-end;
   text-align: right;
 }
@@ -39,34 +39,43 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  font: 21px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
 }
 
 header {
-  padding: 14px 20px;
+  padding: 21px 30px;
   border-bottom: 1px solid var(--line);
 }
-header h1 { margin: 0; font-size: 18px; }
-header .sub { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
+header h1 { margin: 0; font-size: 27px; }
+header .sub { margin: 3px 0 0; color: var(--muted); font-size: 18px; }
 
 main {
-  display: flex;
-  gap: 22px;
-  padding: 20px;
-  align-items: flex-start;
-  flex-wrap: wrap;
+  display: grid;
+  gap: 33px;
+  padding: 30px;
+  align-items: start;
+  justify-content: start;
+  /* Desktop: the board and its "games at this position" list stack in a left column; the move
+     explorer fills a taller right column beside them. Narrower screens collapse to one column
+     (see the media queries below), where the order becomes board -> filters+moves -> games. */
+  grid-template-columns: min(660px, 92vw) minmax(540px, 840px);
+  grid-template-areas:
+    "board explorer"
+    "games explorer";
 }
 
-.left { width: 440px; }
+/* Board column is capped at 660px but shrinks with the viewport so it never overflows a phone. */
+.left { grid-area: board; width: min(660px, 92vw); }
+.games-panel { grid-area: games; }
 .board {
-  width: 440px;
-  height: 440px;
+  width: min(660px, 92vw);
+  height: min(660px, 92vw);
 }
 
 .board-controls {
   display: flex;
-  gap: 6px;
-  margin-top: 10px;
+  gap: 9px;
+  margin-top: 15px;
 }
 .board-controls button {
   flex: 1;
@@ -74,14 +83,14 @@ main {
   color: var(--text);
   border: 1px solid var(--line);
   border-radius: 4px;
-  padding: 7px 4px;
+  padding: 11px 6px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 20px;
 }
 .board-controls button:hover { background: #3a3733; }
 
 .fen-input {
-  margin-top: 10px;
+  margin-top: 15px;
 }
 .fen-input #fen-input {
   width: 100%;
@@ -90,39 +99,39 @@ main {
   color: var(--text);
   border: 1px solid var(--line);
   border-radius: 4px;
-  padding: 7px 8px;
-  font-size: 12px;
+  padding: 11px 12px;
+  font-size: 18px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   line-height: 1.4;
   white-space: nowrap;
   overflow: hidden;         /* single line; JS shrinks the font so the whole FEN fits */
   text-overflow: ellipsis;
 }
-.fen-input .fen-error { display: block; margin-top: 4px; color: #d98c5f; font-size: 12px; }
+.fen-input .fen-error { display: block; margin-top: 6px; color: #d98c5f; font-size: 18px; }
 /* The class rule above outranks the UA [hidden] rule, so restate display:none when hidden. */
 .fen-input .fen-error[hidden] { display: none; }
 
 .movelist {
-  margin-top: 12px;
+  margin-top: 18px;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 4px;
-  padding: 10px;
-  min-height: 38px;
+  padding: 15px;
+  min-height: 57px;
   line-height: 1.9;
 }
 .movelist .ply {
   cursor: pointer;
-  padding: 1px 4px;
+  padding: 2px 6px;
   border-radius: 3px;
 }
 .movelist .ply:hover { background: var(--panel2); }
 .movelist .ply.current { background: var(--accent); color: #fff; }
 .movelist .hint, .movelist .empty { color: var(--muted); }
-.movelist .ply-hint { color: var(--muted); margin-right: 4px; cursor: default; }
+.movelist .ply-hint { color: var(--muted); margin-right: 6px; cursor: default; }
 .movelist .ply-draw {
-  margin-left: 6px;
-  padding: 1px 5px;
+  margin-left: 9px;
+  padding: 2px 8px;
   border-radius: 3px;
   background: var(--panel2);
   color: var(--muted);
@@ -132,7 +141,7 @@ main {
 /* Variation blocks: indented, smaller and dimmer than the mainline. Nested variations sit inside
    their parent block, so each level of nesting indents another step automatically. */
 .movelist .variation {
-  margin-left: 16px;
+  margin-left: 24px;
   font-size: 0.88em;
   line-height: 1.8;
   color: var(--muted);
@@ -142,8 +151,8 @@ main {
 
 .movelist-actions {
   display: flex;
-  gap: 6px;
-  margin-top: 6px;
+  gap: 9px;
+  margin-top: 9px;
 }
 .movelist-actions button {
   flex: 1;
@@ -151,79 +160,79 @@ main {
   color: var(--text);
   border: 1px solid var(--line);
   border-radius: 4px;
-  padding: 5px 4px;
+  padding: 8px 6px;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 18px;
 }
 .movelist-actions button:hover:not(:disabled) { background: #3a3733; }
 .movelist-actions button:disabled { opacity: 0.45; cursor: default; }
 
-.right { flex: 1; min-width: 360px; max-width: 560px; }
+.right { grid-area: explorer; }
 .panel-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
 }
-.left h2 { font-size: 14px; margin: 16px 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
-.filters { display: flex; align-items: center; gap: 16px; flex-wrap: nowrap; white-space: nowrap; }
-.slider-stack { display: flex; flex-direction: column; gap: 6px; }
-.rating-filter { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
-.slider-stack .rating-filter span { min-width: 116px; }
+.games-panel h2 { font-size: 21px; margin: 0 0 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+.filters { display: flex; align-items: center; gap: 24px; flex-wrap: nowrap; white-space: nowrap; }
+.slider-stack { display: flex; flex-direction: column; gap: 9px; }
+.rating-filter { font-size: 18px; color: var(--muted); display: flex; align-items: center; gap: 12px; }
+.slider-stack .rating-filter span { min-width: 174px; }
 .rating-filter #rating-readout { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .rating-filter input[type="range"] {
-  width: 120px;
+  width: 180px;
   accent-color: var(--accent);
   cursor: pointer;
 }
-.user-stack { display: flex; flex-direction: column; gap: 6px; }
-.user-filter { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
-.user-filter .seat { min-width: 36px; }
+.user-stack { display: flex; flex-direction: column; gap: 9px; }
+.user-filter { font-size: 18px; color: var(--muted); display: flex; align-items: center; gap: 9px; }
+.user-filter .seat { min-width: 54px; }
 
 .combobox { position: relative; display: inline-flex; align-items: center; }
 .combobox-input {
-  width: 120px;
+  width: 180px;
   background: var(--panel2);
   color: var(--text);
   border: 1px solid var(--line);
   border-radius: 4px;
-  padding: 3px 20px 3px 6px;
-  font-size: 12px;
+  padding: 5px 30px 5px 9px;
+  font-size: 18px;
 }
 .combobox-input::placeholder { color: #6b6760; }
 .combobox-clear {
   position: absolute;
-  right: 2px;
+  right: 3px;
   background: none;
   border: none;
   color: var(--muted);
   cursor: pointer;
-  font-size: 11px;
-  padding: 2px 4px;
+  font-size: 17px;
+  padding: 3px 6px;
   line-height: 1;
 }
 .combobox-clear:hover { color: var(--text); }
 .combobox-menu {
   position: absolute;
-  top: calc(100% + 2px);
+  top: calc(100% + 3px);
   right: 0;
   min-width: 100%;
-  max-width: 240px;
+  max-width: 360px;
   z-index: 20;
   margin: 0;
-  padding: 4px 0;
+  padding: 6px 0;
   list-style: none;
   background: var(--panel2);
   border: 1px solid var(--line);
   border-radius: 4px;
-  max-height: 280px;
+  max-height: 420px;
   overflow-y: auto;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 9px 27px rgba(0, 0, 0, 0.4);
 }
 .combobox-item {
   display: flex;
   justify-content: space-between;
-  gap: 14px;
-  padding: 4px 10px;
+  gap: 21px;
+  padding: 6px 15px;
   cursor: pointer;
   white-space: nowrap;
 }
@@ -235,7 +244,7 @@ main {
 .combobox-item:hover .cb-count { color: #e8f0dd; }
 
 .explorer {
-  margin-top: 12px;
+  margin-top: 18px;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 4px;
@@ -243,10 +252,10 @@ main {
 }
 .move-row {
   display: grid;
-  grid-template-columns: 70px 70px 1fr;
+  grid-template-columns: 105px 105px 1fr;
   align-items: center;
-  gap: 10px;
-  padding: 7px 12px;
+  gap: 15px;
+  padding: 11px 18px;
   border-bottom: 1px solid var(--line);
   cursor: pointer;
 }
@@ -254,11 +263,11 @@ main {
 .move-row:hover { background: var(--panel2); }
 .move-san { font-weight: 600; }
 .move-count .games { font-variant-numeric: tabular-nums; }
-.move-count .share { font-size: 11px; color: var(--muted); }
+.move-count .share { font-size: 17px; color: var(--muted); }
 
 .winbar {
   display: flex;
-  height: 20px;
+  height: 30px;
   border-radius: 3px;
   overflow: hidden;
   background: var(--draw);
@@ -267,8 +276,8 @@ main {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
-  line-height: 20px;
+  font-size: 17px;
+  line-height: 30px;
   white-space: nowrap;
   overflow: hidden;
 }
@@ -276,18 +285,18 @@ main {
 .winbar .d { background: var(--draw); color: #1f1e1c; }
 .winbar .b { background: var(--black-win); color: #cfccc6; flex: 1; }
 
-.empty { color: var(--muted); padding: 10px 12px; margin: 0; }
+.empty { color: var(--muted); padding: 15px 18px; margin: 0; }
 
 /* Threefold repetition reached: the line is drawn and forward moves are suppressed. */
 .terminal {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 14px 12px;
+  gap: 18px;
+  padding: 21px 18px;
 }
 .terminal-badge {
   flex-shrink: 0;
-  padding: 4px 8px;
+  padding: 6px 12px;
   border-radius: 4px;
   background: var(--draw);
   color: #1f1e1c;
@@ -297,7 +306,7 @@ main {
 .terminal-body strong { display: block; }
 
 #games {
-  margin-bottom: 24px;
+  margin-bottom: 36px;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 4px;
@@ -307,18 +316,18 @@ main {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 6px 12px;
+  padding: 9px 18px;
   border-bottom: 1px solid var(--line);
 }
 .game-row:last-child { border-bottom: none; }
-.players { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.players { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .player {
   background: none;
   border: none;
   color: var(--text);
   cursor: pointer;
   font: inherit;
-  padding: 1px 4px;
+  padding: 2px 6px;
   border-radius: 3px;
 }
 .player:hover { background: var(--panel); color: var(--accent); }
@@ -327,18 +336,48 @@ main {
   color: var(--muted);
   text-decoration: none;
   font-variant-numeric: tabular-nums;
-  padding-left: 8px;
+  padding-left: 12px;
   white-space: nowrap;
 }
 .game-row .result:hover { color: var(--text); }
 
 .loading {
   position: fixed;
-  bottom: 16px;
-  right: 16px;
+  bottom: 24px;
+  right: 24px;
   background: var(--panel2);
   border: 1px solid var(--line);
-  padding: 8px 14px;
+  padding: 12px 21px;
   border-radius: 4px;
   color: var(--muted);
+}
+
+/* Below ~1300px the two full-size columns no longer fit side by side, so stack into one column.
+   Order matches the request: the board, then the filters + move explorer, then the games list. */
+@media (max-width: 1300px) {
+  main {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "board"
+      "explorer"
+      "games";
+    justify-items: center;
+  }
+  .right,
+  .games-panel {
+    width: 100%;
+    max-width: 840px;
+  }
+}
+
+/* Phone tuning: tighter padding, let the filter row wrap instead of overflowing, and slim the
+   move table's fixed columns so the win/loss bar keeps room on a narrow screen. */
+@media (max-width: 640px) {
+  body { font-size: 18px; }
+  header { padding: 14px 16px; }
+  header h1 { font-size: 22px; }
+  main { padding: 12px; gap: 22px; }
+  .filters { flex-wrap: wrap; white-space: normal; gap: 16px; }
+  .move-row { grid-template-columns: 58px 58px 1fr; gap: 10px; padding: 10px 12px; }
+  .games-panel h2 { margin-top: 4px; }
 }

@@ -50,8 +50,10 @@ let whiteCombo: ComboboxController;
 let blackCombo: ComboboxController;
 
 // Clicking a player's name in the games panel commits it to that seat's combobox (which filters).
+// The comboboxes load in the background after first paint, so ignore clicks until they're ready.
 function pickPlayer(name: string, side: "white" | "black"): void {
-  (side === "white" ? whiteCombo : blackCombo).set(name);
+  const combo = side === "white" ? whiteCombo : blackCombo;
+  combo?.set(name);
 }
 
 function currentFilters(): Filters {
@@ -409,7 +411,10 @@ async function main(): Promise<void> {
   fenEl.addEventListener("blur", () => {
     if (!jumping) goToFen(); // skip the blur our own input.blur() fires after a successful jump
   });
-  window.addEventListener("resize", fitFont);
+  window.addEventListener("resize", () => {
+    fitFont();
+    cg?.redrawAll(); // the board is responsive now; recompute its bounds when the viewport changes
+  });
   fitFont(); // size correctly on load
   document.addEventListener("keydown", (e) => {
     if (e.key === "ArrowLeft") back();
@@ -431,7 +436,6 @@ async function main(): Promise<void> {
   try {
     await setupRatingFilter();
     setupMinGamesFilter();
-    await setupUsernameFilter();
     await render();
   } catch (err) {
     $("loading").textContent =
@@ -440,6 +444,11 @@ async function main(): Promise<void> {
     return;
   }
   $("loading").style.display = "none";
+
+  // The username typeahead isn't needed for first paint and its list is large (tens of thousands of
+  // names), so load it in the background rather than blocking the board/moves on it. Until it
+  // resolves the seat comboboxes are simply inert; whiteFilter/blackFilter default to "".
+  setupUsernameFilter().catch((err) => console.error("username filter failed to load:", err));
 }
 
 main();
