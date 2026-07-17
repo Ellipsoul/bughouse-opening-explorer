@@ -10,8 +10,10 @@ Filtering by username: ``white`` and/or ``black`` query params match the corresp
 """
 
 import argparse
+import os
 import re
 import sqlite3
+from functools import lru_cache
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -39,6 +41,18 @@ SELECT a.move_id, m.san, m.from_sq, m.to_sq, m.drop_piece, m.child_id, p.fen AS 
 FROM agg a
 JOIN moves m ON m.parent_id = :pid AND m.move_id = a.move_id
 JOIN positions p ON p.id = m.child_id
+ORDER BY a.n DESC
+"""
+
+# Fast path for the default view (no username filter, rating at the floor): read the precomputed
+# move_agg table instead of aggregating game_facts live. Same shape as MOVES_SQL's result.
+MOVES_AGG_SQL = """
+SELECT a.move_id, m.san, m.from_sq, m.to_sq, m.drop_piece, m.child_id, p.fen AS child_fen,
+       a.n, a.white_wins, a.black_wins, a.draws
+FROM move_agg a
+JOIN moves m ON m.parent_id = :pid AND m.move_id = a.move_id
+JOIN positions p ON p.id = m.child_id
+WHERE a.parent_id = :pid AND a.n >= :min_games
 ORDER BY a.n DESC
 """
 
@@ -131,6 +145,11 @@ def create_app(db_path):
     def rows(sql, params):
         return [dict(r) for r in conn.execute(sql, params).fetchall()]
 
+    # The precomputed summary table may be absent on an older/partially-built database; fall back to
+    # live aggregation when it is, so the server still works before the next reindex.
+    has_move_agg = bool(conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='move_agg'").fetchone())
+
     def rating_clauses(rmin, white, black):
         clauses = ["(g.white_rating + g.black_rating) / 2.0 >= :rmin"]
         params = {"rmin": rmin}
@@ -142,17 +161,29 @@ def create_app(db_path):
             params["black"] = black
         return clauses, params
 
+    # The database is read-only while serving, so query results are stable until the next data
+    # refresh (which restarts the process and clears these caches). Aggregating a busy position —
+    # e.g. the opening tree's root, ~1.3M game_facts rows — costs seconds; memoizing collapses
+    # every repeat hit to a dict lookup. LRU bounds keep filtered variants from growing unbounded
+    # while the common unfiltered views stay hot.
     @app.get("/api/meta")
     def meta():
         return {r["key"]: r["value"] for r in conn.execute("SELECT key, value FROM meta")}
 
-    @app.get("/api/usernames")
-    def usernames():
+    @lru_cache(maxsize=1)
+    def usernames_cached():
         return [{"name": r["u"], "count": r["c"]} for r in conn.execute(USERNAMES_SQL) if r["u"]]
 
-    @app.get("/api/moves")
-    def moves(pid: int, rmin: float = 0,
-              white: str | None = None, black: str | None = None, min_games: int = 5):
+    @app.get("/api/usernames")
+    def usernames():
+        return usernames_cached()
+
+    @lru_cache(maxsize=4096)
+    def moves_cached(pid, rmin, white, black, min_games):
+        # Default view (no username filter, rating at/below the floor): the precomputed move_agg
+        # table already holds this exact aggregation, so serve it as a keyed lookup.
+        if has_move_agg and not white and not black and rmin <= db.RATING_FLOOR:
+            return rows(MOVES_AGG_SQL, {"pid": pid, "min_games": min_games})
         params = {"pid": pid, "rmin": rmin, "min_games": min_games}
         where = " AND f.rating_sum / 2.0 >= :rmin"
         meta_join = ""
@@ -166,6 +197,11 @@ def create_app(db_path):
                 params["black"] = black
         return rows(MOVES_SQL.format(meta_join=meta_join, where=where), params)
 
+    @app.get("/api/moves")
+    def moves(pid: int, rmin: float = 0,
+              white: str | None = None, black: str | None = None, min_games: int = 5):
+        return moves_cached(pid, rmin, white, black, min_games)
+
     @app.get("/api/position")
     def position(fen: str):
         # Resolve a FEN to its position id, mirroring the indexer's hash-then-verify lookup: probe
@@ -178,12 +214,16 @@ def create_app(db_path):
                     return {"id": r["id"], "fen": key}
         raise HTTPException(status_code=404, detail="not_found")
 
-    @app.get("/api/games")
-    def games(pid: int, rmin: float = 0,
-              white: str | None = None, black: str | None = None, limit: int = 8):
+    @lru_cache(maxsize=4096)
+    def games_cached(pid, rmin, white, black, limit):
         clauses, params = rating_clauses(rmin, white, black)
         params.update(pid=pid, limit=limit)
         return rows(GAMES_SQL.format(filters=" AND ".join(clauses)), params)
+
+    @app.get("/api/games")
+    def games(pid: int, rmin: float = 0,
+              white: str | None = None, black: str | None = None, limit: int = 8):
+        return games_cached(pid, rmin, white, black, limit)
 
     dist = Path(__file__).resolve().parent.parent / "frontend" / "dist"
     if dist.is_dir():
@@ -191,11 +231,26 @@ def create_app(db_path):
     return app
 
 
-def serve(db_path="data/games.db", host="127.0.0.1", port=8000):
-    """Run the query server against the unified database (blocking)."""
+def app_factory():
+    """Build the app from the db path in the environment. Used when running multiple worker
+    processes, where uvicorn imports this factory in each worker rather than sharing one app."""
+    return create_app(os.environ["BUGHOUSE_DB"])
+
+
+def serve(db_path="data/games.db", host="127.0.0.1", port=8000, workers=1):
+    """Run the query server against the unified database (blocking).
+
+    Each worker is a separate process with its own connection and result cache, so CPU-bound
+    aggregations run in parallel instead of serializing on one process's GIL.
+    """
     import uvicorn
 
-    uvicorn.run(create_app(db_path), host=host, port=port)
+    if workers and workers > 1:
+        os.environ["BUGHOUSE_DB"] = db_path
+        uvicorn.run("bughouse_explorer.server:app_factory", factory=True,
+                    host=host, port=port, workers=workers)
+    else:
+        uvicorn.run(create_app(db_path), host=host, port=port)
 
 
 def main(argv=None):
@@ -203,8 +258,9 @@ def main(argv=None):
     p.add_argument("--db", default="data/games.db", help="Path to the bughouse database.")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8000)
+    p.add_argument("--workers", type=int, default=1, help="Number of worker processes.")
     args = p.parse_args(argv)
-    serve(args.db, args.host, args.port)
+    serve(args.db, args.host, args.port, args.workers)
 
 
 if __name__ == "__main__":

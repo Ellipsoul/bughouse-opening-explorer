@@ -33,6 +33,12 @@ import time
 # instead of a UNIQUE index over the full FEN text. ("3" itself trimmed the raw ``games`` table.)
 SCHEMA_VERSION = "4"
 
+# Mean-rating floor the explorer treats as "any" — the frontend's rating slider bottoms out here
+# (frontend RATING_MIN), so the default/unfiltered view queries at exactly this threshold. The
+# precomputed ``move_agg`` table is materialized at this same floor so that view is a keyed lookup
+# rather than a full scan of game_facts. Keep the three in sync if the floor ever changes.
+RATING_FLOOR = 1000
+
 
 def fen_hash(fen):
     """Stable 64-bit signed hash of a position FEN — the on-disk position lookup key.
@@ -132,6 +138,20 @@ CREATE INDEX IF NOT EXISTS idx_meta_white ON games_meta(white_username);
 CREATE INDEX IF NOT EXISTS idx_meta_black ON games_meta(black_username);
 -- Lets an incremental run skip games that are already indexed (anti-join on games.uuid).
 CREATE UNIQUE INDEX IF NOT EXISTS idx_games_meta_uuid ON games_meta(uuid);
+
+-- Precomputed per-move aggregate at the RATING_FLOOR mean-rating threshold, so the common
+-- unfiltered landing view is a keyed lookup instead of re-aggregating ~1.3M game_facts rows on
+-- every hit. Populated wholesale after indexing (see indexer.rebuild_move_agg). The PRIMARY KEY
+-- doubles as the parent_id lookup index.
+CREATE TABLE IF NOT EXISTS move_agg (
+    parent_id   INTEGER NOT NULL,
+    move_id     TEXT    NOT NULL,
+    n           INTEGER NOT NULL,
+    white_wins  INTEGER NOT NULL,
+    black_wins  INTEGER NOT NULL,
+    draws       INTEGER NOT NULL,
+    PRIMARY KEY (parent_id, move_id)
+);
 """
 
 _META_SCHEMA = """
@@ -141,7 +161,7 @@ CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 # Names of the derived tables, so ``index --rebuild`` can drop exactly the index layer and leave
 # the raw store untouched. Order: children before the positions they reference (cosmetic; we drop
 # by name, there are no FKs).
-INDEX_TABLES = ["game_facts", "games_meta", "moves", "positions"]
+INDEX_TABLES = ["move_agg", "game_facts", "games_meta", "moves", "positions"]
 
 _GAME_COLUMNS = [
     "uuid", "end_time", "time_control",

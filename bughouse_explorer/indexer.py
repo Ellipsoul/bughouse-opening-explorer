@@ -210,6 +210,8 @@ def index(db_path, max_ply=40, rebuild=False, batch=50000, console=None):
         if progress is not None:
             progress.stop()
 
+    rebuild_move_agg(conn)
+
     n_edges = conn.execute("SELECT COUNT(*) FROM moves").fetchone()[0]
     n_facts = conn.execute("SELECT COUNT(*) FROM game_facts").fetchone()[0]
     n_games = conn.execute("SELECT COUNT(*) FROM games_meta").fetchone()[0]
@@ -223,6 +225,28 @@ def index(db_path, max_ply=40, rebuild=False, batch=50000, console=None):
         conn.execute("VACUUM")
     conn.close()
     return {"new_games": n_new, "total_games": n_games, "edges": n_edges, "facts": n_facts}
+
+
+def rebuild_move_agg(conn):
+    """Rematerialize the ``move_agg`` summary table from game_facts at the RATING_FLOOR threshold.
+
+    Collapses ~47M facts to one row per (position, move) so the default unfiltered explorer view is
+    a keyed lookup. Run after every index pass since new games change the counts; it's a single
+    grouped scan (seconds), cheap next to indexing itself.
+    """
+    with conn:
+        conn.execute("DELETE FROM move_agg")
+        conn.execute(
+            """
+            INSERT INTO move_agg (parent_id, move_id, n, white_wins, black_wins, draws)
+            SELECT parent_id, move_id, COUNT(*),
+                   SUM(outcome = 0), SUM(outcome = 1), SUM(outcome = 2)
+            FROM game_facts
+            WHERE rating_sum / 2.0 >= :floor
+            GROUP BY parent_id, move_id
+            """,
+            {"floor": db.RATING_FLOOR},
+        )
 
 
 def _make_progress(console, total):
