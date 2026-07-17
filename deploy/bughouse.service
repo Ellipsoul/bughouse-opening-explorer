@@ -1,0 +1,20 @@
+[Unit]
+Description=Bughouse opening explorer
+After=network.target
+
+[Service]
+Type=exec
+User=bughouse
+Group=bughouse
+WorkingDirectory=/opt/bughouse/app
+ExecStart=/opt/bughouse/venv/bin/bughouse-explorer-serve --db /opt/bughouse/data/games.db --host 127.0.0.1 --port 8000 --workers 2
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/bughouse/data
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
