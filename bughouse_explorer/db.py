@@ -120,6 +120,10 @@ CREATE TABLE IF NOT EXISTS game_facts (
     PRIMARY KEY (parent_id, move_id, game_id),
     CHECK (outcome IN (0, 1, 2))
 );
+-- Reverse lookup from a game to its facts. Lets username-filtered queries drive from a player's
+-- games (few) instead of scanning every game at a busy position (~1.3M near the opening root);
+-- server.MOVES_USER_SQL forces that join order with CROSS JOIN.
+CREATE INDEX IF NOT EXISTS idx_facts_game ON game_facts(game_id, parent_id);
 
 CREATE TABLE IF NOT EXISTS games_meta (
     game_id         INTEGER PRIMARY KEY,

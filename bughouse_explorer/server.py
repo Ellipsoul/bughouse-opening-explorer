@@ -31,8 +31,32 @@ WITH agg AS (
          SUM(f.outcome = 0) AS white_wins,
          SUM(f.outcome = 1) AS black_wins,
          SUM(f.outcome = 2) AS draws
-  FROM game_facts f {meta_join}
+  FROM game_facts f
   WHERE f.parent_id = :pid {where}
+  GROUP BY f.move_id
+  HAVING COUNT(*) >= :min_games
+)
+SELECT a.move_id, m.san, m.from_sq, m.to_sq, m.drop_piece, m.child_id, p.fen AS child_fen,
+       a.n, a.white_wins, a.black_wins, a.draws
+FROM agg a
+JOIN moves m ON m.parent_id = :pid AND m.move_id = a.move_id
+JOIN positions p ON p.id = m.child_id
+ORDER BY a.n DESC
+"""
+
+# Username-filtered path. Driving from game_facts would scan every game at the position (~1.3M near
+# the root); instead drive from the player's games via games_meta's username index and seek their
+# facts through idx_facts_game(game_id, parent_id). CROSS JOIN pins that join order (SQLite won't
+# pick it on cost alone). Same result shape as MOVES_SQL; {user} is one or both seat predicates.
+MOVES_USER_SQL = """
+WITH agg AS (
+  SELECT f.move_id,
+         COUNT(*) AS n,
+         SUM(f.outcome = 0) AS white_wins,
+         SUM(f.outcome = 1) AS black_wins,
+         SUM(f.outcome = 2) AS draws
+  FROM games_meta g CROSS JOIN game_facts f
+  WHERE {user} AND f.game_id = g.game_id AND f.parent_id = :pid AND f.rating_sum / 2.0 >= :rmin
   GROUP BY f.move_id
   HAVING COUNT(*) >= :min_games
 )
@@ -185,17 +209,16 @@ def create_app(db_path):
         if has_move_agg and not white and not black and rmin <= db.RATING_FLOOR:
             return rows(MOVES_AGG_SQL, {"pid": pid, "min_games": min_games})
         params = {"pid": pid, "rmin": rmin, "min_games": min_games}
-        where = " AND f.rating_sum / 2.0 >= :rmin"
-        meta_join = ""
-        if white or black:  # only join games_meta when filtering by username
-            meta_join = "JOIN games_meta g ON g.game_id = f.game_id"
+        if white or black:  # username filter: use the player-driven query (see MOVES_USER_SQL)
+            user = []
             if white:
-                where += " AND g.white_username = :white"
+                user.append("g.white_username = :white")
                 params["white"] = white
             if black:
-                where += " AND g.black_username = :black"
+                user.append("g.black_username = :black")
                 params["black"] = black
-        return rows(MOVES_SQL.format(meta_join=meta_join, where=where), params)
+            return rows(MOVES_USER_SQL.format(user=" AND ".join(user)), params)
+        return rows(MOVES_SQL.format(where=" AND f.rating_sum / 2.0 >= :rmin"), params)
 
     @app.get("/api/moves")
     def moves(pid: int, rmin: float = 0,
