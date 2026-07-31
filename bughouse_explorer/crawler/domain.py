@@ -6,7 +6,7 @@ import hashlib
 from datetime import datetime, timezone
 
 
-RATING_THRESHOLD = 1800
+RATING_THRESHOLD = 1900
 
 
 def normalize_username(username):
@@ -25,7 +25,9 @@ def eligibility_cutoff(run_started_at):
     return int(cutoff.timestamp())
 
 
-def is_qualifying_observation(rating, end_time, run_started_at, threshold=RATING_THRESHOLD):
+def is_qualifying_observation(
+    rating, end_time, run_started_at, threshold=RATING_THRESHOLD
+):
     """Whether a timestamped post-game rating qualifies a player for a full crawl."""
     if rating is None or end_time is None:
         return False
@@ -34,9 +36,8 @@ def is_qualifying_observation(rating, end_time, run_started_at, threshold=RATING
         numeric_end_time = int(end_time)
     except (TypeError, ValueError):
         return False
-    return (
-        numeric_rating >= threshold
-        and numeric_end_time >= eligibility_cutoff(run_started_at)
+    return numeric_rating >= threshold and numeric_end_time >= eligibility_cutoff(
+        run_started_at
     )
 
 

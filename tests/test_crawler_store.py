@@ -35,7 +35,7 @@ def test_public_month_ingestion_filters_bughouse_and_promotes_qualifying_players
             "rules": "bughouse",
             "end_time": recent,
             "tcn": "mC0K",
-            "white": {"username": "Larso", "rating": 1800, "result": "win"},
+            "white": {"username": "Larso", "rating": 1900, "result": "win"},
             "black": {"username": "Opponent", "rating": 1799, "result": "resigned"},
         },
         {
@@ -63,7 +63,7 @@ def test_public_month_ingestion_filters_bughouse_and_promotes_qualifying_players
     stored = store.get_game("d90dc0b8-7fd3-11f1-ac4d-6cfe54652c60")
     assert stored["numeric_id"] == 178381671801
     assert stored["participants"] == {
-        "white": {"username": "larso", "rating": 1800, "result": "win"},
+        "white": {"username": "larso", "rating": 1900, "result": "win"},
         "black": {"username": "opponent", "rating": 1799, "result": "resigned"},
     }
 
@@ -156,9 +156,17 @@ def test_eligibility_can_become_dormant_and_reactivate_on_a_later_game(store):
 
     original_time = int(datetime(2026, 7, 20, tzinfo=timezone.utc).timestamp())
     store.save_public_month(
-        "larso", 2026, 7,
-        [game("00000000-0000-0000-0000-000000000010", 123456789010,
-              original_time, 1800)],
+        "larso",
+        2026,
+        7,
+        [
+            game(
+                "00000000-0000-0000-0000-000000000010",
+                123456789010,
+                original_time,
+                1900,
+            )
+        ],
         run_started_at=datetime(2026, 7, 31, tzinfo=timezone.utc),
     )
     assert store.status()["players"]["eligible"] == 1
@@ -168,9 +176,10 @@ def test_eligibility_can_become_dormant_and_reactivate_on_a_later_game(store):
 
     later_time = int(datetime(2028, 7, 20, tzinfo=timezone.utc).timestamp())
     store.save_public_month(
-        "larso", 2028, 7,
-        [game("00000000-0000-0000-0000-000000000011", 123456789011,
-              later_time, 1900)],
+        "larso",
+        2028,
+        7,
+        [game("00000000-0000-0000-0000-000000000011", 123456789011, later_time, 1900)],
         run_started_at=datetime(2028, 8, 1, tzinfo=timezone.utc),
     )
     assert store.status()["players"]["eligible"] == 1
@@ -189,15 +198,23 @@ def test_eligibility_can_become_dormant_and_reactivate_on_a_later_game(store):
 def test_monthly_refresh_queues_only_active_eligible_players(store):
     end_time = int(datetime(2026, 7, 20, tzinfo=timezone.utc).timestamp())
     store.save_public_month(
-        "larso", 2026, 7,
-        [{
-            "uuid": "00000000-0000-0000-0000-000000000020",
-            "url": "https://www.chess.com/game/live/123456789020",
-            "rules": "bughouse",
-            "end_time": end_time,
-            "white": {"username": "larso", "rating": 2000, "result": "win"},
-            "black": {"username": "candidate", "rating": 1700, "result": "resigned"},
-        }],
+        "larso",
+        2026,
+        7,
+        [
+            {
+                "uuid": "00000000-0000-0000-0000-000000000020",
+                "url": "https://www.chess.com/game/live/123456789020",
+                "rules": "bughouse",
+                "end_time": end_time,
+                "white": {"username": "larso", "rating": 2000, "result": "win"},
+                "black": {
+                    "username": "candidate",
+                    "rating": 1700,
+                    "result": "resigned",
+                },
+            }
+        ],
         run_started_at=datetime(2026, 7, 31, tzinfo=timezone.utc),
     )
 
@@ -207,15 +224,23 @@ def test_monthly_refresh_queues_only_active_eligible_players(store):
 def test_monthly_refresh_reactivates_a_completed_job_for_the_same_month(store):
     end_time = int(datetime(2026, 7, 20, tzinfo=timezone.utc).timestamp())
     store.save_public_month(
-        "larso", 2026, 7,
-        [{
-            "uuid": "00000000-0000-0000-0000-000000000021",
-            "url": "https://www.chess.com/game/live/123456789021",
-            "rules": "bughouse",
-            "end_time": end_time,
-            "white": {"username": "larso", "rating": 2000, "result": "win"},
-            "black": {"username": "candidate", "rating": 1700, "result": "resigned"},
-        }],
+        "larso",
+        2026,
+        7,
+        [
+            {
+                "uuid": "00000000-0000-0000-0000-000000000021",
+                "url": "https://www.chess.com/game/live/123456789021",
+                "rules": "bughouse",
+                "end_time": end_time,
+                "white": {"username": "larso", "rating": 2000, "result": "win"},
+                "black": {
+                    "username": "candidate",
+                    "rating": 1700,
+                    "result": "resigned",
+                },
+            }
+        ],
         run_started_at=datetime(2026, 7, 31, tzinfo=timezone.utc),
     )
     store.queue_monthly_refresh(2026, 8)

@@ -9,8 +9,7 @@ from bughouse_explorer.crawler.domain import (
 
 def _games(count):
     return [
-        {"uuid": f"game-{i:02d}", "end_time": 1_700_000_000 + i}
-        for i in range(count)
+        {"uuid": f"game-{i:02d}", "end_time": 1_700_000_000 + i} for i in range(count)
     ]
 
 
@@ -35,7 +34,7 @@ def test_eligibility_is_inclusive_and_uses_a_two_calendar_year_window():
     started = datetime(2026, 7, 31, 12, tzinfo=timezone.utc)
     cutoff = int(datetime(2024, 7, 31, 12, tzinfo=timezone.utc).timestamp())
 
-    assert is_qualifying_observation(1800, cutoff, started)
+    assert is_qualifying_observation(1900, cutoff, started)
     assert not is_qualifying_observation(1799, cutoff, started)
     assert not is_qualifying_observation(2200, cutoff - 1, started)
     assert not is_qualifying_observation("unknown", cutoff, started)
