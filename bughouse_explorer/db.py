@@ -1,19 +1,9 @@
-"""Schema and write helpers for the unified bughouse database.
+"""Frozen SQLite schema and writers for the opening-index reference.
 
-One SQLite file now holds both layers of the pipeline:
-
-* **Raw store** (written by ``download``): ``games`` — one row per board, keyed by chess.com's
-  ``uuid`` (so downloading several usernames dedups shared games for free) — and ``archives``,
-  the resume ledger (one row per ``(username, year, month)``; ``complete`` months are never
-  re-fetched). ``games`` keeps only the fields the index actually consumes plus chess.com's
-  compact ``tcn`` move encoding; the indexer decodes ``tcn`` on the fly (no redundant decoded
-  copy is stored). Which months a player has are tracked in ``archives``, not on ``games``.
-* **Derived index** (written by ``index``): ``positions``, ``moves``, ``game_facts``,
-  ``games_meta`` — the per-game position graph the query server aggregates live. ``index`` reads
-  ``games`` from the same file, so there is no separate ``games.db``.
-
-The ``meta(key, value)`` table is shared: the raw layer stores ``schema_version``; the index
-stores ``max_ply`` and ``root_id``. The keys never collide.
+This module intentionally contains no Chess.com fetching or archive-ledger behavior. Its legacy
+``games`` input table remains only so the replay/index implementation can be exercised until it is
+ported to consume the crawler database. The derived ``positions``, ``moves``, ``game_facts``, and
+``games_meta`` tables are queried by the reference server and frontend.
 
 Why the two extra indexes vs. the old standalone explorer.db:
 
@@ -21,13 +11,12 @@ Why the two extra indexes vs. the old standalone explorer.db:
   full-rebuild indexer kept the whole ``fen -> id`` map in RAM and never needed an on-disk index).
   We index an 8-byte :func:`fen_hash` rather than the ~70-byte FEN text — a ~6x smaller index —
   and verify the FEN on the (vanishingly rare) hash hit.
-* ``idx_games_meta_uuid`` — to find which raw ``games`` have not been indexed yet.
+* ``idx_games_meta_uuid`` — to find which legacy-input ``games`` have not been indexed yet.
 """
 
 import hashlib
 import os
 import sqlite3
-import time
 
 # Bumped from "3": positions resolves a FEN by an indexed 8-byte hash (idx_positions_fen_hash)
 # instead of a UNIQUE index over the full FEN text. ("3" itself trimmed the raw ``games`` table.)
@@ -51,12 +40,10 @@ def fen_hash(fen):
         hashlib.blake2b(fen.encode(), digest_size=8).digest(), "big", signed=True
     )
 
-# --- raw store (downloaded games + resume ledger) --------------------------
-# ``games`` carries only what the downloader needs to dedup (uuid) and what the indexer reads:
-# the player/result/rating fields, the few columns copied into games_meta (url, time_control,
-# end_time), and chess.com's compact ``tcn`` move encoding (decoded on the fly when indexing).
-# No indexes: nothing queries this table by anything but its uuid PK / rowid.
-_RAW_SCHEMA = """
+# --- legacy index input ----------------------------------------------------
+# This table is retained for the frozen indexer's fixtures and existing prebuilt databases. New
+# Chess.com data is written only to the crawler database; a future adapter will replace this shape.
+_LEGACY_GAME_SCHEMA = """
 CREATE TABLE IF NOT EXISTS games (
     uuid           TEXT PRIMARY KEY,
     end_time       INTEGER,
@@ -69,16 +56,6 @@ CREATE TABLE IF NOT EXISTS games (
     black_result   TEXT,
     tcn            TEXT,
     url            TEXT
-);
-
-CREATE TABLE IF NOT EXISTS archives (
-    username   TEXT,
-    year       INTEGER,
-    month      INTEGER,
-    status     TEXT,
-    game_count INTEGER,
-    fetched_at INTEGER,
-    PRIMARY KEY (username, year, month)
 );
 """
 
@@ -163,16 +140,9 @@ CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 """
 
 # Names of the derived tables, so ``index --rebuild`` can drop exactly the index layer and leave
-# the raw store untouched. Order: children before the positions they reference (cosmetic; we drop
-# by name, there are no FKs).
+# the legacy input untouched. Order: children before the positions they reference (cosmetic; we
+# drop by name, there are no FKs).
 INDEX_TABLES = ["move_agg", "game_facts", "games_meta", "moves", "positions"]
-
-_GAME_COLUMNS = [
-    "uuid", "end_time", "time_control",
-    "white_username", "white_rating", "white_result",
-    "black_username", "black_rating", "black_result",
-    "tcn", "url",
-]
 
 MOVE_COLUMNS = ["parent_id", "move_id", "san", "from_sq", "to_sq", "drop_piece", "child_id"]
 
@@ -184,13 +154,13 @@ GAMES_META_COLUMNS = [
 
 
 def connect(path):
-    """Open (creating if needed) the unified database with all tables present."""
+    """Open the frozen reference database with its input and index tables present."""
     parent = os.path.dirname(path)
     if parent:
         os.makedirs(parent, exist_ok=True)  # so the default data/ dir works on a fresh clone
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
-    conn.executescript(_RAW_SCHEMA + _INDEX_SCHEMA + _META_SCHEMA)
+    conn.executescript(_LEGACY_GAME_SCHEMA + _INDEX_SCHEMA + _META_SCHEMA)
     conn.execute(
         "INSERT OR IGNORE INTO meta(key, value) VALUES('schema_version', ?)",
         (SCHEMA_VERSION,),
@@ -206,66 +176,11 @@ def create_index_schema(conn):
 
 
 def drop_index(conn):
-    """Drop the derived index tables (and their indexes); leave the raw store intact."""
+    """Drop the derived index tables while leaving the legacy input intact."""
     with conn:
         for table in INDEX_TABLES:
             conn.execute(f"DROP TABLE IF EXISTS {table}")
         conn.execute("DELETE FROM meta WHERE key IN ('max_ply', 'root_id')")
-
-
-# --- raw store: game upserts + resume ledger -------------------------------
-
-def completed_months(conn, username):
-    """Return the set of (year, month) marked complete for this username."""
-    rows = conn.execute(
-        "SELECT year, month FROM archives WHERE username = ? AND status = 'complete'",
-        (username,),
-    ).fetchall()
-    return {(r["year"], r["month"]) for r in rows}
-
-
-def game_row(game):
-    """Flatten a chess.com game record into a tuple matching ``_GAME_COLUMNS``.
-
-    Stores chess.com's ``tcn`` verbatim; the indexer decodes it when replaying the game, so no
-    separate decoded move list is kept.
-    """
-    white = game.get("white", {})
-    black = game.get("black", {})
-    return (
-        game["uuid"],
-        game.get("end_time"),
-        game.get("time_control"),
-        white.get("username"),
-        white.get("rating"),
-        white.get("result"),
-        black.get("username"),
-        black.get("rating"),
-        black.get("result"),
-        game.get("tcn"),
-        game.get("url"),
-    )
-
-
-def save_month(conn, username, year, month, rows, status="complete"):
-    """Upsert a month's games and mark the archive — atomically in one transaction.
-
-    Committing per-month is what makes stop/resume safe: an interrupt mid-month rolls
-    back only the in-flight month, leaving every earlier month intact.
-    """
-    placeholders = ", ".join(["?"] * len(_GAME_COLUMNS))
-    columns = ", ".join(_GAME_COLUMNS)
-    with conn:  # BEGIN ... COMMIT, or ROLLBACK on exception
-        conn.executemany(
-            f"INSERT OR REPLACE INTO games ({columns}) VALUES ({placeholders})",
-            rows,
-        )
-        conn.execute(
-            "INSERT OR REPLACE INTO archives "
-            "(username, year, month, status, game_count, fetched_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (username, year, month, status, len(rows), int(time.time())),
-        )
 
 
 # --- derived index: batched writers (called by the indexer) ----------------

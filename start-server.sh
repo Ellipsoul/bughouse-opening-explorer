@@ -19,7 +19,8 @@ fi
 
 if [[ ! -f "$DB" ]]; then
   echo "error: database not found at $DB" >&2
-  echo "Build it with: bughouse-explorer download <username> --db '$DB' && bughouse-explorer index --db '$DB'" >&2
+  echo "The frozen explorer currently requires a prebuilt legacy games.db." >&2
+  echo "Crawler-to-index integration is deferred to the next phase." >&2
   exit 1
 fi
 

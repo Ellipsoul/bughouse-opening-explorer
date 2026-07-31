@@ -6,7 +6,7 @@ import os
 
 DEFAULT_USER_AGENT = (
     "bughouse-explorer-crawler/0.1 "
-    "(https://github.com/Oh-My-Lands/bughouse-opening-explorer)"
+    "(https://github.com/Ellipsoul/bughouse-opening-explorer)"
 )
 
 

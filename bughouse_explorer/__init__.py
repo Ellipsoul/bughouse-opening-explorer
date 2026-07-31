@@ -1,3 +1,3 @@
-"""Bughouse Opening Explorer: index downloaded games into a position graph."""
+"""Durable Bughouse crawler with a frozen opening-explorer reference."""
 
 __version__ = "0.1.0"

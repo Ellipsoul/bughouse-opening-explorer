@@ -4,6 +4,17 @@ from bughouse_explorer.cli import main
 from bughouse_explorer.crawler.migrations import connect
 
 
+def test_cli_exposes_crawler_and_reference_commands_without_legacy_fetching():
+    result = CliRunner().invoke(main, ["--help"])
+
+    assert result.exit_code == 0, result.output
+    assert "crawl" in result.output
+    assert "index" in result.output
+    assert "serve" in result.output
+    assert "download" not in result.output
+    assert "update" not in result.output
+
+
 def test_crawl_migrate_and_seed_commands_initialize_the_sqlite_queue(tmp_path):
     path = str(tmp_path / "crawler.db")
     runner = CliRunner()

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "bughouse-explorer"
 version = "0.1.0"
-description = "Download chess.com bughouse games and explore their openings — one tool, one database."
+description = "Crawl Chess.com Bughouse games into a durable SQLite data platform."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "AGPL-3.0-or-later" }
@@ -27,7 +27,8 @@ bughouse-explorer = "bughouse_explorer.cli:main"
 bughouse-explorer-serve = "bughouse_explorer.server:main"
 
 [project.urls]
-Repository = "https://github.com/Oh-My-Lands/bughouse-opening-explorer"
+Repository = "https://github.com/Ellipsoul/bughouse-opening-explorer"
+Original = "https://github.com/Oh-My-Lands/bughouse-opening-explorer"
 
 [tool.setuptools.packages.find]
 include = ["bughouse_explorer*"]

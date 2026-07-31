@@ -98,14 +98,14 @@ On a fresh Ubuntu/Fedora server (examples use Fedora `dnf`):
 
 ## The database
 
-`data/games.db` is **not** in the repo (it's gigabytes and regenerable). Options:
+`data/games.db` is **not** in the repo. It belongs to the frozen explorer reference and is not
+currently built by the crawler:
 
-- **Build on the server:** `bughouse-explorer download <user> --db /opt/bughouse/data/games.db`
-  then `bughouse-explorer index --db /opt/bughouse/data/games.db`. Indexing also builds the
-  `move_agg` summary table that keeps the default view fast.
-- **Upload a local copy:** checkpoint the WAL, then
+- **Upload an existing legacy copy:** checkpoint the WAL, then
   `rsync -a --partial --inplace data/games.db root@SERVER:/opt/bughouse/data/` and
   `chown bughouse:bughouse` it. Restart the service afterward.
+
+The future crawler-to-index adapter will replace this manual legacy database handoff.
 
 After replacing the database, `systemctl restart bughouse` to clear the in-process query caches.
 

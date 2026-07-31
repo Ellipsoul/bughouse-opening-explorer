@@ -5,10 +5,10 @@ Replays each game's moves on a single-board engine and records, per ply, the *ed
 each position. All statistics (frequency, win-rate, rating, username/side) are computed later by
 the query server aggregating these facts — nothing is pre-aggregated here.
 
-Indexing is **incremental**: it processes only games that have no ``games_meta`` row yet, so a
-routine update after downloading a few new players is cheap and never re-reads the multi-GB raw
-store. ``rebuild=True`` drops the index layer and reindexes every game (the one-time initial
-build, and the way to change ``max_ply``).
+Indexing is **incremental**: it processes only games that have no ``games_meta`` row yet.
+``rebuild=True`` drops the index layer and reindexes every game. The legacy ``games`` input is
+kept temporarily for this reference implementation; a later phase will adapt the indexer to the
+crawler database.
 
 Because the raw games and the index share one file, the reader and writer are the same connection
 and games are read in **batches** (``fetchall``) rather than one long cursor: a cursor left open
@@ -87,8 +87,7 @@ def index(db_path, max_ply=40, rebuild=False, batch=50000, console=None):
     old standalone builder).
     """
     conn = db.connect(db_path)  # also ensures every table/index exists
-    # Safe journaling: the irreplaceable raw store shares this file, so the old reckless
-    # journal_mode=OFF is gone. The dominant cost is the Python move-replay, so WAL is ~free.
+    # The dominant cost is Python move replay, so safe WAL journaling is effectively free.
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA mmap_size=0")  # keep RSS bounded on a multi-GB file
