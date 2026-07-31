@@ -6,7 +6,9 @@ import hashlib
 from datetime import datetime, timezone
 
 
-RATING_THRESHOLD = 1900
+RATING_THRESHOLD = 2000
+ELIGIBILITY_WINDOW_YEARS = 1
+BUGHOUSE_START_MONTH = (2016, 1)
 
 
 def normalize_username(username):
@@ -15,13 +17,17 @@ def normalize_username(username):
 
 
 def eligibility_cutoff(run_started_at):
-    """Return the Unix timestamp exactly two calendar years before a run."""
+    """Return the Unix timestamp at the run's eligibility-window boundary."""
     if run_started_at.tzinfo is None:
         run_started_at = run_started_at.replace(tzinfo=timezone.utc)
     try:
-        cutoff = run_started_at.replace(year=run_started_at.year - 2)
+        cutoff = run_started_at.replace(
+            year=run_started_at.year - ELIGIBILITY_WINDOW_YEARS
+        )
     except ValueError:  # 29 February -> 28 February in a non-leap cutoff year.
-        cutoff = run_started_at.replace(year=run_started_at.year - 2, day=28)
+        cutoff = run_started_at.replace(
+            year=run_started_at.year - ELIGIBILITY_WINDOW_YEARS, day=28
+        )
     return int(cutoff.timestamp())
 
 

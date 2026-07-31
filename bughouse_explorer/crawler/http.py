@@ -47,11 +47,13 @@ class ChessComCrawlerClient:
         *,
         session=None,
         user_agent,
-        min_interval_ms=250,
+        min_interval_ms=100,
         max_retries=5,
         sleep=time.sleep,
         monotonic=time.monotonic,
         jitter=lambda: random.uniform(0, 0.1),
+        observer=None,
+        slow_response_seconds=10,
     ):
         self.session = session or requests.Session()
         self.session.headers.update(
@@ -63,6 +65,17 @@ class ChessComCrawlerClient:
         self._monotonic = monotonic
         self._jitter = jitter
         self._last_completed = None
+        self._observer = observer
+        self.slow_response_seconds = slow_response_seconds
+
+    def _observe(self, event, **details):
+        if self._observer is None:
+            return
+        try:
+            self._observer({"event": event, **details})
+        except Exception:
+            # Diagnostics must never make an otherwise valid request fail.
+            return
 
     def _pace(self):
         if self._last_completed is None or self.min_interval_ms <= 0:
@@ -74,26 +87,88 @@ class ChessComCrawlerClient:
 
     def _get(self, url, *, headers=None, not_found_error=PermanentHttpError):
         delay = 1.0
+        request_started = self._monotonic()
         for attempt in range(self.max_retries):
             self._pace()
+            attempt_started = self._monotonic()
             try:
                 response = self.session.get(url, timeout=30, headers=headers or {})
             except requests.RequestException as exc:
                 self._last_completed = self._monotonic()
+                elapsed_ms = round(
+                    (self._last_completed - attempt_started) * 1000
+                )
                 if attempt + 1 == self.max_retries:
+                    self._observe(
+                        "http_exhausted",
+                        url=url,
+                        status=None,
+                        attempt=attempt + 1,
+                        elapsed_ms=elapsed_ms,
+                        error_type=type(exc).__name__,
+                        error=str(exc),
+                    )
                     raise DeferredHttpError(f"request failed after retries: {url}") from exc
+                self._observe(
+                    "http_retry",
+                    url=url,
+                    status=None,
+                    attempt=attempt + 1,
+                    elapsed_ms=elapsed_ms,
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                    retry_in_seconds=delay,
+                )
                 self._sleep(delay)
                 delay = min(delay * 2, 60)
                 continue
             self._last_completed = self._monotonic()
+            elapsed_ms = round((self._last_completed - attempt_started) * 1000)
             if response.status_code in (200, 304):
+                if attempt:
+                    self._observe(
+                        "http_recovered",
+                        url=url,
+                        status=response.status_code,
+                        attempts=attempt + 1,
+                        elapsed_ms=elapsed_ms,
+                        total_elapsed_ms=round(
+                            (self._last_completed - request_started) * 1000
+                        ),
+                    )
+                elif elapsed_ms >= self.slow_response_seconds * 1000:
+                    self._observe(
+                        "http_slow",
+                        url=url,
+                        status=response.status_code,
+                        attempts=1,
+                        elapsed_ms=elapsed_ms,
+                    )
                 return response
             if response.status_code == 429 or 500 <= response.status_code < 600:
+                retry_after = response.headers.get("Retry-After")
                 if attempt + 1 == self.max_retries:
+                    self._observe(
+                        "http_exhausted",
+                        url=url,
+                        status=response.status_code,
+                        attempt=attempt + 1,
+                        elapsed_ms=elapsed_ms,
+                        retry_after=retry_after,
+                    )
                     raise DeferredHttpError(
                         f"HTTP {response.status_code} after retries: {url}"
                     )
-                wait = float(response.headers.get("Retry-After", delay))
+                wait = float(retry_after or delay)
+                self._observe(
+                    "http_retry",
+                    url=url,
+                    status=response.status_code,
+                    attempt=attempt + 1,
+                    elapsed_ms=elapsed_ms,
+                    retry_in_seconds=wait,
+                    retry_after=retry_after,
+                )
                 self._sleep(wait)
                 delay = min(delay * 2, 60)
                 continue

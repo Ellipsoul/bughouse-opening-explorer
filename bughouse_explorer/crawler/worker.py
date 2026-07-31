@@ -22,6 +22,7 @@ class CrawlWorker:
         sampler_version=1,
         worker_id="crawler",
         run_id=None,
+        progress=None,
     ):
         self.store = store
         self.client = client
@@ -29,21 +30,52 @@ class CrawlWorker:
         self.sampler_version = sampler_version
         self.worker_id = worker_id
         self.run_id = run_id
+        self.progress = progress
 
-    def run_until_idle(self, max_jobs=None):
-        result = {"processed": 0, "completed": 0, "deferred": 0, "failed": 0}
+    def _report(self, event, job, *, details=None, error=None):
+        if self.progress is None:
+            return
+        report = {
+            "event": event,
+            "job_id": job.id,
+            "job_type": job.type,
+            "attempt": job.attempts,
+            "payload": job.payload,
+        }
+        if details is not None:
+            report["details"] = details
+        if error is not None:
+            report["error"] = str(error)
+        self.progress(report)
+
+    def run_until_idle(self, max_jobs=None, max_players=None):
+        result = {
+            "processed": 0,
+            "completed": 0,
+            "deferred": 0,
+            "failed": 0,
+            "limit_reached": False,
+        }
         while max_jobs is None or result["processed"] < max_jobs:
+            if (
+                max_players is not None
+                and self.store.fully_crawled_player_count() >= max_players
+            ):
+                result["limit_reached"] = True
+                break
             job = self.store.lease_job(self.worker_id)
             if job is None:
                 break
             self.store.assign_job_to_run(job.id, self.run_id)
             self.store.heartbeat(self.run_id) if self.run_id else None
             result["processed"] += 1
+            self._report("START", job)
             try:
                 details = self._process(job)
             except CallbackNotFound as exc:
                 status = self.store.defer_job(job.id, exc, delay_seconds=86_400)
                 result[status] += 1
+                self._report(status.upper(), job, error=exc)
             except DeferredHttpError as exc:
                 status = self.store.defer_job(
                     job.id,
@@ -52,15 +84,19 @@ class CrawlWorker:
                     preserve_after_exhaustion=True,
                 )
                 result[status] += 1
+                self._report(status.upper(), job, error=exc)
             except (PlayerNotFound, PermanentHttpError, ValueError) as exc:
                 self.store.fail_job(job.id, exc)
                 result["failed"] += 1
+                self._report("FAILED", job, error=exc)
             except Exception as exc:
                 self.store.fail_job(job.id, exc)
                 result["failed"] += 1
+                self._report("FAILED", job, error=exc)
             else:
                 self.store.complete_job(job.id, details)
                 result["completed"] += 1
+                self._report("DONE", job, details=details)
         return result
 
     def _process(self, job):

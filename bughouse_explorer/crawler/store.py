@@ -11,6 +11,8 @@ import time
 import uuid as uuidlib
 
 from .domain import (
+    BUGHOUSE_START_MONTH,
+    RATING_THRESHOLD,
     eligibility_cutoff,
     is_qualifying_observation,
     normalize_username,
@@ -215,6 +217,62 @@ class CrawlerStore:
         finally:
             conn.close()
 
+    def record_http_event(self, run_id, report):
+        """Persist HTTP retry diagnostics and their aggregate run counters."""
+        if not run_id:
+            return
+        event = report["event"]
+        status = report.get("status")
+        increments = {}
+        if event == "http_retry":
+            increments["http_retries"] = 1
+        elif event == "http_recovered":
+            increments["http_recoveries"] = 1
+        elif event == "http_slow":
+            increments["http_slow_responses"] = 1
+        elif event == "http_exhausted":
+            increments["http_exhausted"] = 1
+        if status == 429:
+            increments["http_429s"] = 1
+        elif status is not None and 500 <= int(status) < 600:
+            increments["http_5xxs"] = 1
+        error_type = str(report.get("error_type") or "").lower()
+        if "timeout" in error_type:
+            increments["http_timeouts"] = 1
+        elif error_type:
+            increments["http_network_errors"] = 1
+
+        conn = self._connection()
+        try:
+            with conn:
+                row = conn.execute(
+                    "SELECT counters FROM crawl_runs WHERE id = ?", (run_id,)
+                ).fetchone()
+                if not row:
+                    return
+                counters = json.loads(row["counters"])
+                for key, amount in increments.items():
+                    counters[key] = counters.get(key, 0) + amount
+                conn.execute(
+                    "UPDATE crawl_runs SET counters = ?, heartbeat_at = ? WHERE id = ?",
+                    (self._json(counters), self._now(), run_id),
+                )
+                level = (
+                    "error" if event == "http_exhausted"
+                    else "warning" if event in ("http_retry", "http_slow")
+                    else "info"
+                )
+                conn.execute(
+                    """
+                    INSERT INTO crawl_events
+                        (run_id, job_id, level, event, details, created_at)
+                    VALUES (?, NULL, ?, ?, ?, ?)
+                    """,
+                    (run_id, level, event, self._json(report), self._now()),
+                )
+        finally:
+            conn.close()
+
     def finish_run(self, run_id, status="complete", error=None):
         conn = self._connection()
         try:
@@ -319,6 +377,16 @@ class CrawlerStore:
         finally:
             conn.close()
 
+    def fully_crawled_player_count(self):
+        conn = self._connection()
+        try:
+            return conn.execute(
+                "SELECT COUNT(*) FROM players "
+                "WHERE full_crawl_completed_at IS NOT NULL"
+            ).fetchone()[0]
+        finally:
+            conn.close()
+
     def lease_job(self, worker_id, *, lease_seconds=300):
         """Atomically lease the next available job and reclaim expired leases."""
         now = self._now()
@@ -391,7 +459,18 @@ class CrawlerStore:
                 WHERE attempts < max_attempts
                   AND ((status IN ('queued', 'deferred') AND available_at <= ?)
                        OR (status = 'leased' AND leased_until < ?))
-                ORDER BY available_at, id
+                ORDER BY
+                    CASE
+                        WHEN type = 'month'
+                         AND json_extract(payload, '$.mode') IN ('full', 'monthly')
+                            THEN 0
+                        WHEN type = 'archive_list'
+                         AND json_extract(payload, '$.mode') = 'full'
+                            THEN 1
+                        WHEN type = 'partner_probe' THEN 2
+                        ELSE 3
+                    END,
+                    available_at, id
                 LIMIT 1
                 """,
                 (now, now),
@@ -820,9 +899,13 @@ class CrawlerStore:
     def schedule_archive_months(
         self, username, months, *, mode, run_started_at, run_id=None
     ):
-        """Queue either the two-year qualification window or a full lifetime archive."""
+        """Queue either the one-year qualification window or a full lifetime archive."""
         normalized = normalize_username(username)
-        selected = sorted(set(months))
+        selected = [
+            archive_month
+            for archive_month in sorted(set(months))
+            if archive_month >= BUGHOUSE_START_MONTH
+        ]
         if mode == "qualify":
             cutoff = datetime.fromtimestamp(
                 eligibility_cutoff(run_started_at), tz=timezone.utc
@@ -858,6 +941,38 @@ class CrawlerStore:
             conn.close()
         return selected
 
+    def discard_pre_bughouse_month_work(self):
+        """Remove unfinished legacy work for months before Bughouse existed."""
+        start_year, start_month = BUGHOUSE_START_MONTH
+        conn = self._connection()
+        try:
+            with conn:
+                jobs = conn.execute(
+                    """
+                    DELETE FROM crawl_jobs
+                    WHERE type = 'month' AND status <> 'complete'
+                      AND (
+                        CAST(json_extract(payload, '$.year') AS INTEGER) < ?
+                        OR (
+                          CAST(json_extract(payload, '$.year') AS INTEGER) = ?
+                          AND CAST(json_extract(payload, '$.month') AS INTEGER) < ?
+                        )
+                      )
+                    """,
+                    (start_year, start_year, start_month),
+                ).rowcount
+                player_months = conn.execute(
+                    """
+                    DELETE FROM player_months
+                    WHERE status <> 'complete'
+                      AND (year < ? OR (year = ? AND month < ?))
+                    """,
+                    (start_year, start_year, start_month),
+                ).rowcount
+                return {"jobs": jobs, "player_months": player_months}
+        finally:
+            conn.close()
+
     def mark_full_crawl_completed_if_done(self, username):
         normalized = normalize_username(username)
         conn = self._connection()
@@ -890,20 +1005,108 @@ class CrawlerStore:
         conn = self._connection()
         try:
             with conn:
-                cursor = conn.execute(
+                eligible_before = {
+                    row["id"]
+                    for row in conn.execute(
+                        "SELECT id FROM players WHERE state = 'eligible'"
+                    )
+                }
+                conn.execute(
                     """
-                    UPDATE players SET state = 'dormant', updated_at = ?
-                    WHERE state = 'eligible'
-                      AND (qualifying_at IS NULL OR qualifying_at < ?)
+                    UPDATE players
+                    SET state = CASE WHEN EXISTS (
+                            SELECT 1
+                            FROM game_participants gp
+                            JOIN games g ON g.uuid = gp.game_uuid
+                            WHERE gp.player_id = players.id
+                              AND gp.rating_source IN ('public', 'callback_pgn')
+                              AND gp.rating >= ? AND g.end_time >= ?
+                        ) THEN 'eligible' ELSE 'dormant' END,
+                        qualifying_rating = (
+                            SELECT gp.rating
+                            FROM game_participants gp
+                            JOIN games g ON g.uuid = gp.game_uuid
+                            WHERE gp.player_id = players.id
+                              AND gp.rating_source IN ('public', 'callback_pgn')
+                              AND gp.rating >= ? AND g.end_time >= ?
+                            ORDER BY g.end_time DESC, gp.rating DESC, gp.game_uuid
+                            LIMIT 1
+                        ),
+                        qualifying_game_uuid = (
+                            SELECT gp.game_uuid
+                            FROM game_participants gp
+                            JOIN games g ON g.uuid = gp.game_uuid
+                            WHERE gp.player_id = players.id
+                              AND gp.rating_source IN ('public', 'callback_pgn')
+                              AND gp.rating >= ? AND g.end_time >= ?
+                            ORDER BY g.end_time DESC, gp.rating DESC, gp.game_uuid
+                            LIMIT 1
+                        ),
+                        qualifying_at = (
+                            SELECT g.end_time
+                            FROM game_participants gp
+                            JOIN games g ON g.uuid = gp.game_uuid
+                            WHERE gp.player_id = players.id
+                              AND gp.rating_source IN ('public', 'callback_pgn')
+                              AND gp.rating >= ? AND g.end_time >= ?
+                            ORDER BY g.end_time DESC, gp.rating DESC, gp.game_uuid
+                            LIMIT 1
+                        ),
+                        updated_at = ?
+                    WHERE state IN ('eligible', 'dormant')
                     """,
-                    (self._now(), cutoff),
+                    (
+                        RATING_THRESHOLD,
+                        cutoff,
+                        RATING_THRESHOLD,
+                        cutoff,
+                        RATING_THRESHOLD,
+                        cutoff,
+                        RATING_THRESHOLD,
+                        cutoff,
+                        self._now(),
+                    ),
                 )
-                return cursor.rowcount
+                dormant = conn.execute(
+                    "SELECT id FROM players WHERE state = 'dormant'"
+                ).fetchall()
+                dormant_ids = {row["id"] for row in dormant}
+                conn.execute(
+                    """
+                    DELETE FROM crawl_jobs
+                    WHERE status <> 'complete'
+                      AND type IN ('archive_list', 'month')
+                      AND json_extract(payload, '$.username') IN (
+                        SELECT username FROM players WHERE state = 'dormant'
+                      )
+                    """
+                )
+                conn.execute(
+                    """
+                    DELETE FROM player_months
+                    WHERE status <> 'complete'
+                      AND player_id IN (
+                        SELECT id FROM players WHERE state = 'dormant'
+                      )
+                    """
+                )
+                return len(eligible_before & dormant_ids)
         finally:
             conn.close()
 
+    def queue_current_month_refresh(self, run_started_at, *, run_id=None):
+        """Requeue the still-changing UTC calendar month for active players."""
+        if run_started_at.tzinfo is None:
+            run_started_at = run_started_at.replace(tzinfo=timezone.utc)
+        current = run_started_at.astimezone(timezone.utc)
+        return self.queue_monthly_refresh(
+            current.year, current.month, run_id=run_id
+        )
+
     def queue_monthly_refresh(self, year, month, *, run_id=None):
-        """Queue the previous calendar month for every active eligible player."""
+        """Queue a calendar month for every active eligible player."""
+        if (year, month) < BUGHOUSE_START_MONTH:
+            return []
         conn = self._connection()
         try:
             with conn:

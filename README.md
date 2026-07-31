@@ -51,7 +51,7 @@ approved seeds
 ```
 
 A player qualifies when a Bughouse board ending inside the run's
-two-calendar-year window records a post-game rating of at least 1900. Seeds are
+one-calendar-year window records a post-game rating of at least 2000. Seeds are
 not exempt. A candidate can qualify on a later encounter, and a dormant player
 can reactivate when new qualifying evidence appears.
 
@@ -81,12 +81,13 @@ bughouse-explorer crawl migrate
 # Load the bundled operator-approved seed manifest.
 bughouse-explorer crawl seed
 
-# Process the self-expanding queue until it is idle.
-bughouse-explorer crawl bootstrap
+# Stop after 100 players have completed their lifetime crawls.
+bughouse-explorer crawl bootstrap --max-players 100
 ```
 
-Before an unattended or shared crawl, set `CHESSCOM_USER_AGENT` to an identity
-containing useful operator contact information.
+The default `CHESSCOM_USER_AGENT` identifies this repository and includes the
+operator contact address `aronteh.chess@gmail.com`. Forks and deployments with a
+different operator should override it.
 
 Monitor the crawler from another terminal:
 
@@ -94,6 +95,13 @@ Monitor the crawler from another terminal:
 bughouse-explorer crawl status --watch
 bughouse-explorer crawl status --json
 ```
+
+Active crawl commands also print one timestamped `START` and outcome line per
+job, including the current player/month and fetched Bughouse counts. This output
+remains visible when the command runs inside tmux or a systemd journal.
+HTTP anomalies are logged separately: rate limits, server errors, network
+timeouts, retry delays, recoveries, and successful responses slower than ten
+seconds. Their aggregate counters are persisted in the run status.
 
 Stop with Ctrl-C and continue safely:
 
@@ -104,7 +112,8 @@ bughouse-explorer crawl resume
 bughouse-explorer crawl resume RUN_ID
 ```
 
-Refresh the previous calendar month for active eligible players:
+Refresh both the previous calendar month and the still-changing current month
+for active eligible players:
 
 ```bash
 bughouse-explorer crawl monthly
@@ -118,14 +127,19 @@ bughouse-explorer crawl monthly --year 2026 --month 7
 | Variable                   | Default               | Purpose                                       |
 | -------------------------- | --------------------- | --------------------------------------------- |
 | `BUGHOUSE_CRAWLER_DB`      | `data/crawler.db`     | Raw games, crawl state, and progress          |
-| `CHESSCOM_USER_AGENT`      | This repository's URL | Contact-bearing HTTP identity                 |
-| `CHESSCOM_MIN_INTERVAL_MS` | `250`                 | Minimum interval between Chess.com requests   |
+| `CHESSCOM_USER_AGENT`      | Repository URL + operator email | Contact-bearing HTTP identity       |
+| `CHESSCOM_MIN_INTERVAL_MS` | `100`                 | Minimum interval between Chess.com requests   |
 | `BUGHOUSE_SAMPLER_VERSION` | `1`                   | Deterministic partner-sampling policy version |
 
 The crawler uses one synchronous worker and one HTTP request at a time. It sends
 ETag and Last-Modified validators, honours Retry-After, backs off on transient
 failures, and stores retries in the durable queue instead of losing work when
-the process exits.
+the process exits. Archive scheduling has a hard lower bound of January 2016,
+when Bughouse became available on Chess.com.
+
+Current-month archive responses are partial snapshots. Every bootstrap, resume,
+and monthly refresh requeues that UTC month for active players; UUID upserts
+append newly published games without duplicating boards already stored.
 
 ## SQLite data model
 

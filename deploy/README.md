@@ -18,7 +18,7 @@ useradd --system --no-create-home --home-dir /opt/bughouse --shell /usr/sbin/nol
 install -d -o bughouse-crawler -g bughouse-crawler -m 0750 /opt/bughouse/data
 install -d -o root -g bughouse-crawler -m 0750 /etc/bughouse
 install -o root -g bughouse-crawler -m 0640 deploy/crawler.env.example /etc/bughouse/crawler.env
-# Edit CHESSCOM_USER_AGENT in /etc/bughouse/crawler.env to include real contact information.
+# Override CHESSCOM_USER_AGENT if this deployment has a different operator.
 ```
 
 Install/migrate the application and start the initial crawl manually:

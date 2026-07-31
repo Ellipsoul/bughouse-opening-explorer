@@ -35,8 +35,8 @@ def test_public_month_ingestion_filters_bughouse_and_promotes_qualifying_players
             "rules": "bughouse",
             "end_time": recent,
             "tcn": "mC0K",
-            "white": {"username": "Larso", "rating": 1900, "result": "win"},
-            "black": {"username": "Opponent", "rating": 1799, "result": "resigned"},
+            "white": {"username": "Larso", "rating": 2000, "result": "win"},
+            "black": {"username": "Opponent", "rating": 1999, "result": "resigned"},
         },
         {
             "uuid": "00000000-0000-0000-0000-000000000001",
@@ -63,8 +63,33 @@ def test_public_month_ingestion_filters_bughouse_and_promotes_qualifying_players
     stored = store.get_game("d90dc0b8-7fd3-11f1-ac4d-6cfe54652c60")
     assert stored["numeric_id"] == 178381671801
     assert stored["participants"] == {
-        "white": {"username": "larso", "rating": 1900, "result": "win"},
-        "black": {"username": "opponent", "rating": 1799, "result": "resigned"},
+        "white": {"username": "larso", "rating": 2000, "result": "win"},
+        "black": {"username": "opponent", "rating": 1999, "result": "resigned"},
+    }
+
+
+def test_same_public_board_reached_through_both_players_is_stored_once(store):
+    game = {
+        "uuid": "00000000-0000-0000-0000-000000000002",
+        "url": "https://www.chess.com/game/live/123456789002",
+        "rules": "bughouse",
+        "end_time": int(datetime(2026, 7, 20, tzinfo=timezone.utc).timestamp()),
+        "white": {"username": "larso", "rating": 2000, "result": "win"},
+        "black": {"username": "opponent", "rating": 1950, "result": "resigned"},
+    }
+    started = datetime(2026, 7, 31, tzinfo=timezone.utc)
+
+    store.save_public_month(
+        "larso", 2026, 7, [game], run_started_at=started
+    )
+    store.save_public_month(
+        "opponent", 2026, 7, [game], run_started_at=started
+    )
+
+    assert store.status()["games"] == 1
+    assert store.get_game(game["uuid"])["participants"] == {
+        "white": {"username": "larso", "rating": 2000, "result": "win"},
+        "black": {"username": "opponent", "rating": 1950, "result": "resigned"},
     }
 
 
@@ -164,7 +189,7 @@ def test_eligibility_can_become_dormant_and_reactivate_on_a_later_game(store):
                 "00000000-0000-0000-0000-000000000010",
                 123456789010,
                 original_time,
-                1900,
+                2000,
             )
         ],
         run_started_at=datetime(2026, 7, 31, tzinfo=timezone.utc),
@@ -179,7 +204,7 @@ def test_eligibility_can_become_dormant_and_reactivate_on_a_later_game(store):
         "larso",
         2028,
         7,
-        [game("00000000-0000-0000-0000-000000000011", 123456789011, later_time, 1900)],
+        [game("00000000-0000-0000-0000-000000000011", 123456789011, later_time, 2000)],
         run_started_at=datetime(2028, 8, 1, tzinfo=timezone.utc),
     )
     assert store.status()["players"]["eligible"] == 1
@@ -193,6 +218,95 @@ def test_eligibility_can_become_dormant_and_reactivate_on_a_later_game(store):
         conn.close()
     assert reactivation is not None
     assert reactivation["type"] == "archive_list"
+
+
+def test_policy_reevaluation_applies_the_current_rating_threshold(store):
+    observed_at = int(datetime(2026, 7, 20, tzinfo=timezone.utc).timestamp())
+    store.save_public_month(
+        "larso",
+        2026,
+        7,
+        [
+            {
+                "uuid": "00000000-0000-0000-0000-000000000012",
+                "url": "https://www.chess.com/game/live/123456789012",
+                "rules": "bughouse",
+                "end_time": observed_at,
+                "white": {"username": "larso", "rating": 2000, "result": "win"},
+                "black": {"username": "other", "rating": 1500, "result": "loss"},
+            }
+        ],
+        run_started_at=datetime(2026, 7, 31, tzinfo=timezone.utc),
+    )
+    conn = store._connection()
+    try:
+        with conn:
+            conn.execute(
+                "UPDATE game_participants SET rating = 1999 "
+                "WHERE player_id = (SELECT id FROM players WHERE username = 'larso')"
+            )
+            conn.execute(
+                "UPDATE players SET qualifying_rating = 1999 "
+                "WHERE username = 'larso'"
+            )
+    finally:
+        conn.close()
+
+    dormant = store.reevaluate_dormancy(
+        datetime(2026, 7, 31, tzinfo=timezone.utc)
+    )
+
+    assert dormant == 1
+    assert store.status()["players"]["dormant"] == 1
+    assert store.lease_job("worker").type == "partner_probe"
+
+
+def test_policy_reevaluation_ignores_callback_profile_ratings(store):
+    old_observation = int(datetime(2024, 7, 20, tzinfo=timezone.utc).timestamp())
+    store.save_public_month(
+        "larso",
+        2024,
+        7,
+        [
+            {
+                "uuid": "00000000-0000-0000-0000-000000000013",
+                "url": "https://www.chess.com/game/live/123456789013",
+                "rules": "bughouse",
+                "end_time": old_observation,
+                "white": {"username": "larso", "rating": 2000, "result": "win"},
+                "black": {"username": "other", "rating": 1500, "result": "loss"},
+            }
+        ],
+        run_started_at=datetime(2024, 7, 31, tzinfo=timezone.utc),
+    )
+    store.save_callback_game(
+        {
+            "game": {
+                "type": "bughouse",
+                "uuid": "00000000-0000-0000-0000-000000000014",
+                "id": 123456789014,
+                "endTime": int(
+                    datetime(2026, 7, 20, tzinfo=timezone.utc).timestamp()
+                ),
+                "pgnHeaders": {"White": "larso", "Result": "1-0"},
+            },
+            "players": {
+                "white": {
+                    "color": "white",
+                    "username": "larso",
+                    "rating": 2300,
+                }
+            },
+        },
+        run_started_at=datetime(2026, 7, 31, tzinfo=timezone.utc),
+    )
+
+    dormant = store.reevaluate_dormancy(
+        datetime(2026, 7, 31, tzinfo=timezone.utc)
+    )
+
+    assert dormant == 1
+    assert store.status()["players"]["dormant"] == 1
 
 
 def test_monthly_refresh_queues_only_active_eligible_players(store):
@@ -218,6 +332,8 @@ def test_monthly_refresh_queues_only_active_eligible_players(store):
         run_started_at=datetime(2026, 7, 31, tzinfo=timezone.utc),
     )
 
+    assert store.queue_monthly_refresh(2015, 12) == []
+    assert store.month_cache("larso", 2015, 12) is None
     assert store.queue_monthly_refresh(2026, 8) == ["larso"]
 
 
@@ -266,6 +382,35 @@ def test_monthly_refresh_reactivates_a_completed_job_for_the_same_month(store):
     finally:
         conn.close()
     assert dict(job) == {"status": "queued", "attempts": 0}
+
+
+def test_current_month_is_queued_again_after_a_partial_archive_fetch(store):
+    end_time = int(datetime(2026, 7, 30, tzinfo=timezone.utc).timestamp())
+    store.save_public_month(
+        "larso",
+        2026,
+        7,
+        [
+            {
+                "uuid": "00000000-0000-0000-0000-000000000022",
+                "url": "https://www.chess.com/game/live/123456789022",
+                "rules": "bughouse",
+                "end_time": end_time,
+                "white": {"username": "larso", "rating": 2000, "result": "win"},
+                "black": {"username": "candidate", "rating": 1700, "result": "loss"},
+            }
+        ],
+        run_started_at=datetime(2026, 7, 31, tzinfo=timezone.utc),
+        etag="partial-month",
+    )
+    assert store.month_cache("larso", 2026, 7)["status"] == "complete"
+
+    queued = store.queue_current_month_refresh(
+        datetime(2026, 7, 31, tzinfo=timezone.utc)
+    )
+
+    assert queued == ["larso"]
+    assert store.month_cache("larso", 2026, 7)["status"] == "queued"
 
 
 def test_month_job_attempt_and_failure_are_visible_in_player_month(store):
@@ -347,3 +492,97 @@ def test_transient_job_remains_deferred_after_each_retry_budget(store):
     finally:
         conn.close()
     assert attempts == 5
+
+
+def test_lifetime_month_work_is_leased_before_broader_discovery(store):
+    store.seed_usernames(["older-seed"])
+    end_time = int(datetime(2026, 7, 20, tzinfo=timezone.utc).timestamp())
+    store.save_public_month(
+        "larso",
+        2026,
+        7,
+        [
+            {
+                "uuid": "00000000-0000-0000-0000-000000000040",
+                "url": "https://www.chess.com/game/live/123456789040",
+                "rules": "bughouse",
+                "end_time": end_time,
+                "white": {"username": "larso", "rating": 2000, "result": "win"},
+                "black": {"username": "other", "rating": 1700, "result": "loss"},
+            }
+        ],
+        run_started_at=datetime(2026, 7, 31, tzinfo=timezone.utc),
+    )
+    store.schedule_archive_months(
+        "larso",
+        [(2020, 1)],
+        mode="full",
+        run_started_at=datetime(2026, 7, 31, tzinfo=timezone.utc),
+    )
+
+    job = store.lease_job("worker")
+
+    assert job.type == "month"
+    assert job.payload == {
+        "username": "larso",
+        "year": 2020,
+        "month": 1,
+        "mode": "full",
+    }
+
+
+def test_archive_scheduling_starts_with_january_2016(store):
+    selected = store.schedule_archive_months(
+        "larso",
+        [(2015, 12), (2016, 1), (2016, 2)],
+        mode="full",
+        run_started_at=datetime(2026, 7, 31, tzinfo=timezone.utc),
+    )
+
+    assert selected == [(2016, 1), (2016, 2)]
+    assert store.status()["jobs"]["queued"] == 2
+
+
+def test_seed_qualification_scans_only_the_latest_calendar_year(store):
+    selected = store.schedule_archive_months(
+        "larso",
+        [(2025, 6), (2025, 7), (2026, 1), (2026, 7)],
+        mode="qualify",
+        run_started_at=datetime(2026, 7, 31, tzinfo=timezone.utc),
+    )
+
+    assert selected == [(2026, 7), (2026, 1), (2025, 7)]
+
+
+def test_pre_2016_work_from_an_existing_queue_is_discarded(store):
+    store.seed_usernames(["larso"])
+    conn = store._connection()
+    try:
+        with conn:
+            player_id = conn.execute(
+                "SELECT id FROM players WHERE username = 'larso'"
+            ).fetchone()[0]
+            conn.execute(
+                "INSERT INTO player_months (player_id, year, month, status) "
+                "VALUES (?, 2015, 12, 'queued')",
+                (player_id,),
+            )
+            conn.execute(
+                """
+                INSERT INTO crawl_jobs
+                    (job_key, type, payload, status, attempts, max_attempts,
+                     available_at, created_at, updated_at)
+                VALUES
+                    ('month:larso:2015-12', 'month',
+                     '{"username":"larso","year":2015,"month":12,"mode":"full"}',
+                     'queued', 0, 5, 0, 0, 0)
+                """
+            )
+    finally:
+        conn.close()
+
+    discarded = store.discard_pre_bughouse_month_work()
+
+    assert discarded == {"jobs": 1, "player_months": 1}
+    assert store.month_cache("larso", 2015, 12) is None
+    assert store.lease_job("worker").type == "archive_list"

@@ -6,7 +6,8 @@ import os
 
 DEFAULT_USER_AGENT = (
     "bughouse-explorer-crawler/0.1 "
-    "(https://github.com/Ellipsoul/bughouse-opening-explorer)"
+    "(https://github.com/Ellipsoul/bughouse-opening-explorer; "
+    "mailto:aronteh.chess@gmail.com)"
 )
 
 
@@ -14,7 +15,7 @@ DEFAULT_USER_AGENT = (
 class CrawlerConfig:
     database_path: str = "data/crawler.db"
     user_agent: str = DEFAULT_USER_AGENT
-    min_interval_ms: int = 250
+    min_interval_ms: int = 100
     sampler_version: int = 1
 
     @classmethod
@@ -23,6 +24,6 @@ class CrawlerConfig:
         return cls(
             database_path=env.get("BUGHOUSE_CRAWLER_DB", "data/crawler.db"),
             user_agent=env.get("CHESSCOM_USER_AGENT", DEFAULT_USER_AGENT),
-            min_interval_ms=int(env.get("CHESSCOM_MIN_INTERVAL_MS", "250")),
+            min_interval_ms=int(env.get("CHESSCOM_MIN_INTERVAL_MS", "100")),
             sampler_version=int(env.get("BUGHOUSE_SAMPLER_VERSION", "1")),
         )

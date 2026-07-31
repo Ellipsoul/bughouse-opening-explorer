@@ -30,12 +30,12 @@ def test_medium_month_sampling_is_stable_and_spans_both_chronological_halves():
     assert first[1] in games[5:]
 
 
-def test_eligibility_is_inclusive_and_uses_a_two_calendar_year_window():
+def test_eligibility_is_inclusive_and_uses_a_one_calendar_year_window():
     started = datetime(2026, 7, 31, 12, tzinfo=timezone.utc)
-    cutoff = int(datetime(2024, 7, 31, 12, tzinfo=timezone.utc).timestamp())
+    cutoff = int(datetime(2025, 7, 31, 12, tzinfo=timezone.utc).timestamp())
 
-    assert is_qualifying_observation(1900, cutoff, started)
-    assert not is_qualifying_observation(1799, cutoff, started)
+    assert is_qualifying_observation(2000, cutoff, started)
+    assert not is_qualifying_observation(1999, cutoff, started)
     assert not is_qualifying_observation(2200, cutoff - 1, started)
     assert not is_qualifying_observation("unknown", cutoff, started)
     assert not is_qualifying_observation(2200, "unknown", started)

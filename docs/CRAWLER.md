@@ -28,8 +28,8 @@ handling.
 
 ## Eligibility and discovery
 
-A timestamped post-game rating qualifies when it is at least 1900 and the board
-ended on or after the run's exact two-calendar-year cutoff. The boundary is
+A timestamped post-game rating qualifies when it is at least 2000 and the board
+ended on or after the run's exact one-calendar-year cutoff. The boundary is
 inclusive. Seeds are candidates, not exceptions: their recent archives are
 scanned newest-first, and lifetime work is queued only after qualifying evidence
 appears.
@@ -91,15 +91,17 @@ leasing, and an expired lease is automatically reclaimed after interruption.
 ## HTTP policy
 
 There is one synchronous worker and one shared client, so exactly one request is
-in flight. The client waits at least `CHESSCOM_MIN_INTERVAL_MS` (250 ms by
+in flight. The client waits at least `CHESSCOM_MIN_INTERVAL_MS` (100 ms by
 default) plus small jitter between completed requests. It sends conditional
 validators for repeat month requests, honours numeric `Retry-After`, and retries
 network errors, 429s, and 5xx responses with exponential backoff capped at 60
-seconds. Exhausted immediate attempts defer the durable job instead of
-terminating the run.
+seconds. Each retry records its response status or exception type, elapsed time,
+attempt, selected delay, and `Retry-After`; a later success records recovery.
+Successful responses slower than ten seconds are also recorded. Exhausted
+immediate attempts defer the durable job instead of terminating the run.
 
-Set `CHESSCOM_USER_AGENT` to a useful contact-bearing value before an unattended
-crawl, following
+The default `CHESSCOM_USER_AGENT` includes this repository and the operator's
+contact email. Override it when the operator changes, following
 [Chess.com's serial-access guidance](https://www.chess.com/news/view/published-data-api).
 
 ## Commands and progress
@@ -107,16 +109,35 @@ crawl, following
 ```text
 bughouse-explorer crawl migrate
 bughouse-explorer crawl seed USERNAME...
-bughouse-explorer crawl bootstrap [--max-jobs N]
+bughouse-explorer crawl bootstrap [--max-jobs N] [--max-players N]
 bughouse-explorer crawl monthly [--year YYYY --month MM] [--max-jobs N]
-bughouse-explorer crawl resume [RUN_ID] [--max-jobs N]
+bughouse-explorer crawl resume [RUN_ID] [--max-jobs N] [--max-players N]
 bughouse-explorer crawl status [--watch] [--json]
 ```
+
+`--max-players N` stops when the database contains `N` players with completed
+lifetime crawls; queued work remains durable for a later resume. Current-month
+archives are mutable snapshots, so bootstrap and resume requeue the current UTC
+month for active players. The monthly command queues both the selected/previous
+month and the current partial month. Game UUID upserts make repeated snapshots
+append-only and idempotent.
+
+January 2016 is the hard lower archive boundary because Chess.com did not offer
+Bughouse earlier. Archive-list scheduling and explicit monthly refreshes both
+enforce it. On startup, unfinished pre-2016 work left by an older crawler build
+is discarded while already completed audit records are retained.
 
 Status is read-only and reports candidate/eligible/dormant/fully-crawled
 players, queue states, current job/player/month, boards and resolved partner
 links, request counters and rate, retries, heartbeat, recent job throughput,
 remaining queue size, and the latest persisted error.
+
+Bootstrap, monthly, and resume commands stream timestamped job progress to the
+terminal. Each job produces a `START` line followed by `DONE`, `DEFERRED`, or
+`FAILED`, with player/month context and ingestion counts where available. The
+same output is captured by tmux and the systemd journal. HTTP anomaly counters
+for retries, 429s, recoveries, timeouts, network errors, 5xx responses, slow
+responses, and exhausted retry budgets remain available in run status JSON.
 
 ## Operations
 

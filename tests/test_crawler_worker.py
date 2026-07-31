@@ -84,6 +84,25 @@ def test_worker_expands_from_seed_through_sampled_partner_board(tmp_path):
     assert store.status()["fully_crawled_players"] == 4
 
 
+def test_worker_stops_at_a_total_fully_crawled_player_limit(tmp_path):
+    path = str(tmp_path / "crawler.db")
+    apply_migrations(path)
+    store = CrawlerStore(path)
+    store.seed_usernames(["larso"])
+    worker = CrawlWorker(
+        store,
+        ChessComBoundary(),
+        run_started_at=datetime(2026, 7, 31, tzinfo=timezone.utc),
+        worker_id="test-worker",
+    )
+
+    result = worker.run_until_idle(max_players=2)
+
+    assert result["limit_reached"] is True
+    assert store.status()["fully_crawled_players"] == 2
+    assert store.status()["remaining_jobs"] > 0
+
+
 def test_callback_404_gets_three_daily_retries_before_becoming_failed(tmp_path):
     path = str(tmp_path / "crawler.db")
     apply_migrations(path)
