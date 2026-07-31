@@ -1,14 +1,65 @@
 # Bughouse Opening Explorer
 
-A tool for studying bughouse openings: download a player's games from chess.com,
-index them into a position graph, and browse openings in a
-**single-board**. You drill into positions and, for each continuation, see how
-many games played it and the win split.
+This repository now contains two SQLite-backed workflows:
 
-One self-contained Python package (`bughouse_explorer`) does everything — **download**, **index**,
-and **serve** — writing to **one SQLite database**.
+- a durable, crawler-first raw Bughouse data service in `data/crawler.db`; and
+- the original local downloader, opening index, API, and frontend in `data/games.db`.
 
-## The pipeline
+The crawler is the active development path. It starts from approved players, applies a rolling
+rating eligibility rule, follows sampled Bughouse partner boards, and can stop and resume without
+losing queue state. It uses Python's built-in SQLite support with WAL mode, so it needs neither
+PostgreSQL nor Docker. The original explorer remains operational as a reference implementation
+until its indexing and read API are ported onto the crawler data in a later phase.
+
+## Crawler quickstart
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e '.[dev]'
+
+# Create/migrate the standalone crawler database.
+bughouse-explorer crawl migrate
+
+# With no arguments this loads the 35 operator-approved initial seeds.
+bughouse-explorer crawl seed
+
+# Run until the durable queue is idle. Initial seeding is idempotent and enabled by default.
+bughouse-explorer crawl bootstrap
+```
+
+Use `bughouse-explorer crawl status --watch` from another terminal for persisted progress. Stop
+with Ctrl-C and continue with `bughouse-explorer crawl resume`. To preserve the exact eligibility
+cutoff of a particular interrupted run, copy its id from status and run
+`bughouse-explorer crawl resume RUN_ID`.
+
+The monthly command refreshes the previous calendar month for active eligible players and
+re-evaluates dormancy:
+
+```bash
+bughouse-explorer crawl monthly
+# Deterministic/operator replay:
+bughouse-explorer crawl monthly --year 2026 --month 7
+```
+
+Crawler configuration is environment-backed:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `BUGHOUSE_CRAWLER_DB` | `data/crawler.db` | Raw games, crawl state, and progress |
+| `CHESSCOM_USER_AGENT` | Repository URL | Set this to a contact-bearing operator identity |
+| `CHESSCOM_MIN_INTERVAL_MS` | `250` | Minimum delay between all Chess.com requests |
+| `BUGHOUSE_SAMPLER_VERSION` | `1` | Version in deterministic partner-probe selection |
+
+See [docs/CRAWLER.md](docs/CRAWLER.md) for the schema, eligibility and partner policies,
+resumability model, operations, and the boundary with the future online opening tree.
+
+## Legacy explorer
+
+The remainder of this README documents the frozen local explorer. These commands still operate
+on `data/games.db` and do not read the new crawler database.
+
+### The legacy pipeline
 
 ```
 chess.com  ──(download)──►  raw games ─┐
@@ -29,7 +80,7 @@ chess.com  ──(download)──►  raw games ─┐
    `/api/meta`, `/api/usernames`). 
 4. The **frontend** (Vite + TypeScript + chessground) calls that API and navigates positions by id.
 
-## Data model
+### Legacy data model
 
 One `data/games.db` holds two layers. The **raw store** is the irreplaceable download; the
 **derived index** is regenerated from it (`index --rebuild`) and is what the server queries.
@@ -63,7 +114,7 @@ One `data/games.db` holds two layers. The **raw store** is the irreplaceable dow
 `meta(key, value)` is shared: the raw layer stores `schema_version`; the index stores `max_ply`
 and `root_id` (the start position's id).
 
-## Quickstart
+### Legacy quickstart
 
 ```bash
 git clone https://github.com/Oh-My-Lands/bughouse-opening-explorer.git
@@ -88,7 +139,7 @@ bughouse-explorer serve
 
 `bughouse-explorer update SomeUsername` does steps 1–2 in at once.
 
-## Indexing depth and rebuilds
+### Indexing depth and rebuilds
 
 `--max-ply N` (default **40**) bounds how deep the index records each game. It is fixed once the
 index exists; to change it, rebuild the whole index from the raw games (the raw games are kept, so
@@ -101,14 +152,14 @@ bughouse-explorer index --max-ply 30 --rebuild
 Everything else (rating, min-games, username) is a live query parameter — you never rebuild to
 change a filter.
 
-## Filters (live, no rebuild)
+### Filters (live, no rebuild)
 
 - **Mean rating ≥** — a slider; only games whose two players average at or above the threshold count.
 - **Min games** — a slider (1–10, default 5); continuations played in fewer games are hidden.
 - **White / Black username** — typeahead comboboxes; filter to a seat, or both for an exact pairing.
   Clicking a player's name in the games panel commits it to that seat's filter.
 
-## Run the GUI
+### Run the GUI
 
 Two local processes during development: the query server and the Vite dev server.
 
@@ -131,7 +182,7 @@ For a **single-process** run, `npm run build` then `bughouse-explorer serve` —
 `frontend/dist` alongside the API on one port (http://localhost:8000). (`bughouse-explorer-serve`
 is kept as an alias for `bughouse-explorer serve`.)
 
-## Layout
+### Layout
 
 ```
 bughouse-opening-explorer/
@@ -144,13 +195,14 @@ bughouse-opening-explorer/
     db.py         # unified schema + write helpers (raw store + index)
     server.py     # FastAPI query server
     cli.py        # bughouse-explorer download / index / serve / update
+    crawler/      # SQLite crawler: HTTP, policy, persistence, durable jobs, CLI
   frontend/
     src/{main,db,explorer,combobox}.ts · src/styles.css · index.html
   tests/          # test_engine.py · test_tcn.py · test_indexer.py
   data/           # generated database lives here (gitignored)
 ```
 
-## Tests
+### Tests
 
 ```bash
 pytest
@@ -159,17 +211,18 @@ pytest
 The tests replay real games' full move lists (asserting the engine reproduces the exact final
 position chess.com recorded), decode the `tcn` format, and check incremental indexing.
 
-## Bughouse constraints
+### Legacy Bughouse constraints
 
-chess.com bughouse records carry no PGN (moves come only from the decoded `tcn` field), and the API
-returns each of the two boards as a separate record with no field linking the pair. This project
-works within those constraints: the raw `tcn` is the only move record kept (decoded on demand when
-indexing), and the explorer treats each board as a standalone single-board game.
+Chess.com public Bughouse records carry no PGN (moves come from the decoded `tcn` field), and the
+public archive returns each board separately. The legacy explorer therefore treats a board as a
+standalone game. The new crawler enriches a deterministic sample through Chess.com's undocumented
+live-game callback, stores its partner reference defensively, and never lets callback failure roll
+back authoritative public-archive ingestion.
 
-## Possible future features
+### Possible future features
 
 More filters (time-class / date / color), reconstructing the two boards of a game, engine eval.
 
-## License
+### License
 
 [AGPL-3.0](LICENSE).

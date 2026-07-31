@@ -1,0 +1,23 @@
+[Unit]
+Description=Bughouse Chess.com previous-month refresh
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=bughouse-crawler
+Group=bughouse-crawler
+WorkingDirectory=/opt/bughouse/app
+EnvironmentFile=/etc/bughouse/crawler.env
+ExecStart=/usr/bin/flock --wait 60 /opt/bughouse/data/crawler.lock /opt/bughouse/venv/bin/bughouse-explorer crawl monthly
+TimeoutStartSec=infinity
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ReadWritePaths=/opt/bughouse/data
+

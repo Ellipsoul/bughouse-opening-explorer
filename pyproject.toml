@@ -31,3 +31,6 @@ Repository = "https://github.com/Oh-My-Lands/bughouse-opening-explorer"
 
 [tool.setuptools.packages.find]
 include = ["bughouse_explorer*"]
+
+[tool.setuptools.package-data]
+bughouse_explorer = ["crawler/sql/*.sql", "crawler/*.txt"]

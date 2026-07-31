@@ -4,6 +4,54 @@ The explorer runs as a systemd service behind Caddy (which terminates HTTPS via 
 Routine deploys are one command; the files here are the server-side configuration, kept in the repo
 so a server can be rebuilt from scratch.
 
+The crawler is separate from the legacy web service. It uses local SQLite, has no network-facing
+database or Docker dependency, and runs as a dedicated `bughouse-crawler` user.
+
+## Crawler setup
+
+Install `sqlite` and `util-linux` (for `flock`), then create the least-privilege account and its
+protected environment file:
+
+```sh
+dnf -y install sqlite util-linux
+useradd --system --no-create-home --home-dir /opt/bughouse --shell /usr/sbin/nologin bughouse-crawler
+install -d -o bughouse-crawler -g bughouse-crawler -m 0750 /opt/bughouse/data
+install -d -o root -g bughouse-crawler -m 0750 /etc/bughouse
+install -o root -g bughouse-crawler -m 0640 deploy/crawler.env.example /etc/bughouse/crawler.env
+# Edit CHESSCOM_USER_AGENT in /etc/bughouse/crawler.env to include real contact information.
+```
+
+Install/migrate the application and start the initial crawl manually:
+
+```sh
+/opt/bughouse/venv/bin/pip install -e /opt/bughouse/app
+sudo -u bughouse-crawler /opt/bughouse/venv/bin/bughouse-explorer \
+  crawl --crawler-db /opt/bughouse/data/crawler.db migrate
+cp deploy/bughouse-crawler.service /etc/systemd/system/
+cp deploy/bughouse-crawler-monthly.service /etc/systemd/system/
+cp deploy/bughouse-crawler-monthly.timer /etc/systemd/system/
+systemctl daemon-reload
+systemctl start bughouse-crawler.service
+systemctl enable --now bughouse-crawler-monthly.timer
+```
+
+The bootstrap service exits when the currently available queue is idle. Starting it again is safe;
+all seeds, months, games, and probes are idempotent. Inspect it without mutating state with:
+
+```sh
+sudo -u bughouse-crawler /opt/bughouse/venv/bin/bughouse-explorer \
+  crawl --crawler-db /opt/bughouse/data/crawler.db status
+journalctl -u bughouse-crawler.service -f
+systemctl list-timers bughouse-crawler-monthly.timer
+```
+
+Both services take the same `flock`, ensuring that only one crawler worker can run. The timer runs
+at 03:00 UTC on day two and is persistent across downtime.
+
+Back up `crawler.db` with SQLite's online `.backup` command, then copy the completed backup off-host.
+Do not copy only the main file while it has an active WAL. The crawler database is irreplaceable;
+the legacy opening index and future derived tree are rebuildable.
+
 ## Routine deploy
 
 From the repo root:
@@ -80,4 +128,3 @@ The report contains visitor IPs, so it is not served publicly. Copy it down to v
 ```sh
 scp root@<server>:/var/log/caddy/report.html . && xdg-open report.html
 ```
-

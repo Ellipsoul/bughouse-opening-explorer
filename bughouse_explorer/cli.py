@@ -19,6 +19,7 @@ from rich.console import Console
 from . import db, indexer, server
 from .api import ApiError, ChessComClient, PlayerNotFound
 from .download import download as run_download
+from .crawler.cli import crawl
 
 DEFAULT_DB = "data/games.db"
 console = Console()
@@ -83,6 +84,9 @@ def _index(db_path, max_ply, rebuild):
 @click.group()
 def main():
     """Download, index, and serve chess.com bughouse openings from one database."""
+
+
+main.add_command(crawl)
 
 
 @main.command()
