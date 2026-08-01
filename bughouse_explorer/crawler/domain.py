@@ -47,27 +47,14 @@ def is_qualifying_observation(
     )
 
 
-def _sample_key(game, username, year, month, sampler_version):
-    value = (
-        f"{sampler_version}|{username.lower()}|{year:04d}|{month:02d}|{game['uuid']}"
-    )
-    return hashlib.blake2b(value.encode(), digest_size=16).digest()
-
-
-def _pick(games, username, year, month, sampler_version):
+def select_partner_year_sample(games, username, year, sampler_version=2):
+    """Choose one deterministic board from an already-filtered player-year."""
+    if not games:
+        return None
+    prefix = f"{sampler_version}|{username.lower()}|{year:04d}|"
     return min(
         games,
-        key=lambda game: _sample_key(game, username, year, month, sampler_version),
+        key=lambda game: hashlib.blake2b(
+            f"{prefix}{game['uuid']}".encode(), digest_size=16
+        ).digest(),
     )
-
-
-def select_partner_samples(games, username, year, month, sampler_version=1):
-    """Return deterministic callback probes for one player-month."""
-    ordered = sorted(games, key=lambda game: (game.get("end_time") or 0, game["uuid"]))
-    if len(ordered) <= 4:
-        return ordered
-    if len(ordered) <= 20:
-        split = len(ordered) // 2
-        strata = (ordered[:split], ordered[split:])
-        return [_pick(s, username, year, month, sampler_version) for s in strata]
-    return [_pick(ordered, username, year, month, sampler_version)]

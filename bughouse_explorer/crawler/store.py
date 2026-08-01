@@ -16,7 +16,7 @@ from .domain import (
     eligibility_cutoff,
     is_qualifying_observation,
     normalize_username,
-    select_partner_samples,
+    select_partner_year_sample,
 )
 from .migrations import connect
 from .records import normalize_callback_game
@@ -83,7 +83,7 @@ class CrawlerStore:
         self, conn, job_key, job_type, payload, *, max_attempts=5, run_id=None, available_at=None
     ):
         now = self._now()
-        conn.execute(
+        cursor = conn.execute(
             """
             INSERT INTO crawl_jobs
                 (run_id, job_key, type, payload, max_attempts,
@@ -102,6 +102,7 @@ class CrawlerStore:
                 now,
             ),
         )
+        return cursor.rowcount == 1
 
     def seed_usernames(self, usernames):
         """Idempotently register seeds and queue their archive qualification scans."""
@@ -180,6 +181,27 @@ class CrawlerStore:
                 result["config"] = json.loads(result["config"])
                 result["counters"] = json.loads(result["counters"])
                 return result
+        finally:
+            conn.close()
+
+    def get_run(self, run_id):
+        """Return one persisted run without changing its status or heartbeat."""
+        conn = self._connection()
+        try:
+            row = conn.execute(
+                """
+                SELECT id, run_type, status, config, counters, started_at,
+                       heartbeat_at, ended_at, last_error
+                FROM crawl_runs WHERE id = ?
+                """,
+                (run_id,),
+            ).fetchone()
+            if row is None:
+                raise ValueError(f"unknown crawl run: {run_id}")
+            result = dict(row)
+            result["config"] = json.loads(result["config"])
+            result["counters"] = json.loads(result["counters"])
+            return result
         finally:
             conn.close()
 
@@ -288,6 +310,118 @@ class CrawlerStore:
         finally:
             conn.close()
 
+    @staticmethod
+    def _closure_audit_connection(conn):
+        remaining = conn.execute(
+            """
+            SELECT COUNT(*) FROM crawl_jobs
+            WHERE status IN ('queued', 'leased', 'deferred')
+            """
+        ).fetchone()[0]
+        failed = conn.execute(
+            "SELECT COUNT(*) FROM crawl_jobs WHERE status = 'failed'"
+        ).fetchone()[0]
+        eligible_without_outcome = conn.execute(
+            """
+            SELECT COUNT(*) FROM players
+            WHERE state = 'eligible' AND full_crawl_completed_at IS NULL
+              AND archive_unavailable_at IS NULL
+            """
+        ).fetchone()[0]
+        unavailable_archives = conn.execute(
+            """
+            SELECT COUNT(*) FROM players
+            WHERE state = 'eligible' AND archive_unavailable_at IS NOT NULL
+            """
+        ).fetchone()[0]
+        result = {
+            "remaining_jobs": remaining,
+            "failed_jobs": failed,
+            "eligible_without_outcome": eligible_without_outcome,
+            "terminal_archive_players": unavailable_archives,
+        }
+        result["ready"] = not any(
+            result[key]
+            for key in ("remaining_jobs", "failed_jobs", "eligible_without_outcome")
+        )
+        return result
+
+    def closure_audit(self):
+        """Return the durable conditions required for a truthful closure result."""
+        conn = self._connection()
+        try:
+            return self._closure_audit_connection(conn)
+        finally:
+            conn.close()
+
+    def reconcile_crawl_state(self, *, run_id=None):
+        """Restore durable work for eligible players that have no completion path."""
+        conn = self._connection()
+        try:
+            failed_404s = list(
+                conn.execute(
+                    """
+                    SELECT id, type, last_error FROM crawl_jobs
+                    WHERE status = 'failed' AND last_error LIKE 'HTTP 404:%'
+                      AND type IN ('archive_list', 'month')
+                    ORDER BY id
+                    """
+                )
+            )
+        finally:
+            conn.close()
+
+        terminalized_months = 0
+        terminalized_archives = 0
+        for job in failed_404s:
+            if job["type"] == "month":
+                self.mark_month_terminal_unavailable(
+                    job["id"], job["last_error"]
+                )
+                terminalized_months += 1
+            else:
+                self.mark_archive_terminal_unavailable(
+                    job["id"], job["last_error"]
+                )
+                terminalized_archives += 1
+
+        conn = self._connection()
+        try:
+            with conn:
+                stranded = list(conn.execute(
+                    """
+                    SELECT p.username
+                    FROM players p
+                    WHERE p.state = 'eligible'
+                      AND p.full_crawl_completed_at IS NULL
+                      AND p.archive_unavailable_at IS NULL
+                      AND NOT EXISTS (
+                        SELECT 1 FROM crawl_jobs cj
+                        WHERE cj.status IN ('queued', 'leased', 'deferred')
+                          AND cj.type IN ('archive_list', 'month')
+                          AND json_extract(cj.payload, '$.username') = p.username
+                      )
+                    ORDER BY p.username
+                    """
+                ))
+                queued = 0
+                for row in stranded:
+                    if self._enqueue(
+                        conn,
+                        f"reconcile:archive:{row['username']}:v3",
+                        "archive_list",
+                        {"username": row["username"], "mode": "full"},
+                        run_id=run_id,
+                    ):
+                        queued += 1
+                return {
+                    "terminalized_months": terminalized_months,
+                    "terminalized_archives": terminalized_archives,
+                    "requeued_archive_lists": queued,
+                }
+        finally:
+            conn.close()
+
     def status(self):
         conn = self._connection()
         try:
@@ -304,6 +438,20 @@ class CrawlerStore:
                 "SELECT status, COUNT(*) AS count FROM crawl_jobs GROUP BY status"
             ):
                 jobs[row["status"]] = row["count"]
+            terminal = {
+                "unavailable_months": conn.execute(
+                    "SELECT COUNT(*) FROM player_months WHERE unavailable_at IS NOT NULL"
+                ).fetchone()[0],
+                "unavailable_archives": conn.execute(
+                    "SELECT COUNT(*) FROM players WHERE archive_unavailable_at IS NOT NULL"
+                ).fetchone()[0],
+                "unresolved_probes": conn.execute(
+                    """
+                    SELECT COUNT(*) FROM crawl_jobs
+                    WHERE terminal_outcome = 'probe_unresolved'
+                    """
+                ).fetchone()[0],
+            }
             games = conn.execute("SELECT COUNT(*) FROM games").fetchone()[0]
             partner_links = conn.execute(
                 "SELECT COUNT(*) FROM games WHERE partner_uuid IS NOT NULL"
@@ -334,8 +482,12 @@ class CrawlerStore:
                 current["payload"] = json.loads(current["payload"])
             error_row = conn.execute(
                 """
-                SELECT event, details, created_at FROM crawl_events
-                WHERE level = 'error' ORDER BY created_at DESC LIMIT 1
+                SELECT ce.event, ce.details, ce.created_at
+                FROM crawl_events ce
+                LEFT JOIN crawl_jobs cj ON cj.id = ce.job_id
+                WHERE ce.level = 'error'
+                  AND (ce.job_id IS NULL OR cj.status = 'failed')
+                ORDER BY ce.created_at DESC LIMIT 1
                 """
             ).fetchone()
             latest_error = dict(error_row) if error_row else None
@@ -361,10 +513,12 @@ class CrawlerStore:
                     - active_run["started_at"],
                 )
                 active_run["request_rate_per_second"] = request_count / elapsed
+            closure = self._closure_audit_connection(conn)
             return {
                 "players": players,
                 "fully_crawled_players": fully_crawled,
                 "jobs": jobs,
+                "terminal": terminal,
                 "remaining_jobs": jobs["queued"] + jobs["leased"] + jobs["deferred"],
                 "retries": retries,
                 "recent_jobs_per_hour": recent_completed * 12,
@@ -373,6 +527,7 @@ class CrawlerStore:
                 "current": current,
                 "latest_error": latest_error,
                 "run": active_run,
+                "closure": closure,
             }
         finally:
             conn.close()
@@ -610,6 +765,118 @@ class CrawlerStore:
         finally:
             conn.close()
 
+    def mark_month_terminal_unavailable(self, job_id, error):
+        """Retain an unavailable public month as a terminal audited outcome."""
+        now = self._now()
+        conn = self._connection()
+        try:
+            with conn:
+                job = conn.execute(
+                    "SELECT id, type, payload, attempts FROM crawl_jobs WHERE id = ?",
+                    (job_id,),
+                ).fetchone()
+                if not job or job["type"] != "month":
+                    raise ValueError("terminal month outcome requires a month job")
+                payload = json.loads(job["payload"])
+                conn.execute(
+                    """
+                    UPDATE crawl_jobs
+                    SET status = 'complete', terminal_outcome = 'month_unavailable',
+                        terminal_at = ?, completed_at = ?, leased_by = NULL,
+                        leased_until = NULL, last_error = ?, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (now, now, str(error), now, job_id),
+                )
+                conn.execute(
+                    """
+                    UPDATE player_months
+                    SET status = 'failed', attempts = ?, last_error = ?,
+                        unavailable_at = ?, unavailable_error = ?
+                    WHERE player_id = (
+                        SELECT id FROM players WHERE username = ?
+                    ) AND year = ? AND month = ?
+                    """,
+                    (
+                        job["attempts"], str(error), now, str(error),
+                        normalize_username(payload["username"]),
+                        int(payload["year"]), int(payload["month"]),
+                    ),
+                )
+                self._event(
+                    conn, job_id, "warning", "job_terminal_unavailable",
+                    {"error": str(error), "resource": "month"},
+                )
+        finally:
+            conn.close()
+
+    def mark_archive_terminal_unavailable(self, job_id, error):
+        """Record an inaccessible player archive without claiming it was crawled."""
+        now = self._now()
+        conn = self._connection()
+        try:
+            with conn:
+                job = conn.execute(
+                    "SELECT id, type, payload FROM crawl_jobs WHERE id = ?",
+                    (job_id,),
+                ).fetchone()
+                if not job or job["type"] != "archive_list":
+                    raise ValueError("terminal archive outcome requires an archive job")
+                payload = json.loads(job["payload"])
+                username = normalize_username(payload["username"])
+                conn.execute(
+                    """
+                    UPDATE crawl_jobs
+                    SET status = 'complete', terminal_outcome = 'archive_unavailable',
+                        terminal_at = ?, completed_at = ?, leased_by = NULL,
+                        leased_until = NULL, last_error = ?, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (now, now, str(error), now, job_id),
+                )
+                conn.execute(
+                    """
+                    UPDATE players SET archive_unavailable_at = ?,
+                        archive_unavailable_error = ?, updated_at = ?
+                    WHERE username = ?
+                    """,
+                    (now, str(error), now, username),
+                )
+                self._event(
+                    conn, job_id, "warning", "job_terminal_unavailable",
+                    {"error": str(error), "resource": "archive_list"},
+                )
+        finally:
+            conn.close()
+
+    def mark_probe_terminal_unresolved(self, job_id, error):
+        """Retain a callback 404 after its bounded retries as an audited outcome."""
+        now = self._now()
+        conn = self._connection()
+        try:
+            with conn:
+                job = conn.execute(
+                    "SELECT id, type FROM crawl_jobs WHERE id = ?", (job_id,)
+                ).fetchone()
+                if not job or job["type"] != "partner_probe":
+                    raise ValueError("terminal probe outcome requires a probe job")
+                conn.execute(
+                    """
+                    UPDATE crawl_jobs
+                    SET status = 'complete', terminal_outcome = 'probe_unresolved',
+                        terminal_at = ?, completed_at = ?, leased_by = NULL,
+                        leased_until = NULL, last_error = ?, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (now, now, str(error), now, job_id),
+                )
+                self._event(
+                    conn, job_id, "warning", "job_terminal_unavailable",
+                    {"error": str(error), "resource": "partner_probe"},
+                )
+        finally:
+            conn.close()
+
     def _set_month_job_status(
         self, conn, job, status, error=None, *, attempts=None
     ):
@@ -714,7 +981,7 @@ class CrawlerStore:
         run_started_at,
         etag=None,
         last_modified=None,
-        sampler_version=1,
+        sampler_version=2,
         run_id=None,
     ):
         """Atomically store one public archive month and enqueue discovered work."""
@@ -727,7 +994,6 @@ class CrawlerStore:
                 malformed_games += 1
                 continue
             bughouse.append(game)
-        owner = normalize_username(username)
         now = self._now()
         conn = self._connection()
         try:
@@ -781,28 +1047,6 @@ class CrawlerStore:
                                 end_time, run_started_at, run_id,
                             )
 
-                samples = select_partner_samples(
-                    bughouse, owner, year, month, sampler_version
-                )
-                for game in samples:
-                    numeric_id = self._numeric_id(game.get("url"))
-                    reference = str(numeric_id) if numeric_id is not None else game["uuid"]
-                    self._enqueue(
-                        conn,
-                        f"partner:{game['uuid']}",
-                        "partner_probe",
-                        {
-                            "board_uuid": game["uuid"],
-                            "reference": reference,
-                            "username": owner,
-                            "year": year,
-                            "month": month,
-                            "sampler_version": sampler_version,
-                        },
-                        max_attempts=4,
-                        run_id=run_id,
-                    )
-
                 conn.execute(
                     """
                     INSERT INTO player_months
@@ -816,7 +1060,8 @@ class CrawlerStore:
                         archive_game_count = excluded.archive_game_count,
                         bughouse_game_count = excluded.bughouse_game_count,
                         sampler_version = excluded.sampler_version,
-                        fetched_at = excluded.fetched_at, last_error = NULL
+                        fetched_at = excluded.fetched_at, last_error = NULL,
+                        unavailable_at = NULL, unavailable_error = NULL
                     """,
                     (
                         owner_row["id"], year, month, etag, last_modified,
@@ -841,7 +1086,7 @@ class CrawlerStore:
         result = {
             "archive_games": len(games),
             "bughouse_games": len(bughouse),
-            "probes": len(samples),
+            "probes": 0,
         }
         if malformed_games:
             result["malformed_games"] = malformed_games
@@ -869,7 +1114,9 @@ class CrawlerStore:
             with conn:
                 conn.execute(
                     """
-                    UPDATE player_months SET status = 'complete', fetched_at = ?, last_error = NULL
+                    UPDATE player_months SET status = 'complete', fetched_at = ?,
+                        last_error = NULL, unavailable_at = NULL,
+                        unavailable_error = NULL
                     WHERE player_id = (SELECT id FROM players WHERE username = ?)
                       AND year = ? AND month = ?
                     """,
@@ -916,6 +1163,32 @@ class CrawlerStore:
         try:
             with conn:
                 player = self._ensure_player(conn, username, "archive_owner")
+                if mode == "full":
+                    now = self._now()
+                    conn.execute(
+                        "DELETE FROM player_archive_month_manifest WHERE player_id = ?",
+                        (player["id"],),
+                    )
+                    conn.executemany(
+                        """
+                        INSERT INTO player_archive_month_manifest
+                            (player_id, year, month, observed_at, run_id)
+                        VALUES (?, ?, ?, ?, ?)
+                        """,
+                        [
+                            (player["id"], year, month, now, run_id)
+                            for year, month in selected
+                        ],
+                    )
+                    conn.execute(
+                        """
+                        UPDATE players SET full_archive_list_fetched_at = ?,
+                            archive_unavailable_at = NULL,
+                            archive_unavailable_error = NULL,
+                            updated_at = ? WHERE id = ?
+                        """,
+                        (now, now, player["id"]),
+                    )
                 for year, month in selected:
                     conn.execute(
                         """
@@ -925,18 +1198,69 @@ class CrawlerStore:
                         """,
                         (player["id"], year, month),
                     )
-                    self._enqueue(
-                        conn,
-                        f"month:{normalized}:{year:04d}-{month:02d}",
-                        "month",
-                        {
-                            "username": normalized,
-                            "year": year,
-                            "month": month,
-                            "mode": mode,
-                        },
-                        run_id=run_id,
+                    ledger = conn.execute(
+                        """
+                        SELECT status, unavailable_at FROM player_months
+                        WHERE player_id = ? AND year = ? AND month = ?
+                        """,
+                        (player["id"], year, month),
+                    ).fetchone()
+                    if ledger["status"] == "complete" or ledger["unavailable_at"]:
+                        continue
+                    now = self._now()
+                    payload = self._json({
+                        "username": normalized,
+                        "year": year,
+                        "month": month,
+                        "mode": mode,
+                    })
+                    conn.execute(
+                        """
+                        INSERT INTO crawl_jobs
+                            (run_id, job_key, type, payload, max_attempts,
+                             available_at, created_at, updated_at)
+                        VALUES (?, ?, 'month', ?, 5, ?, ?, ?)
+                        ON CONFLICT (job_key) DO UPDATE SET
+                            run_id = excluded.run_id, payload = excluded.payload,
+                            status = 'queued', attempts = 0,
+                            available_at = excluded.available_at,
+                            leased_by = NULL, leased_until = NULL,
+                            last_error = NULL, completed_at = NULL,
+                            terminal_outcome = NULL, terminal_at = NULL,
+                            updated_at = excluded.updated_at
+                        WHERE crawl_jobs.status <> 'leased'
+                        """,
+                        (
+                            run_id,
+                            f"month:{normalized}:{year:04d}-{month:02d}",
+                            payload, now, now, now,
+                        ),
                     )
+                if mode == "full":
+                    incomplete = conn.execute(
+                        """
+                        SELECT COUNT(*)
+                        FROM player_archive_month_manifest manifest
+                        LEFT JOIN player_months pm
+                          ON pm.player_id = manifest.player_id
+                         AND pm.year = manifest.year AND pm.month = manifest.month
+                        WHERE manifest.player_id = ?
+                          AND (
+                            pm.player_id IS NULL OR (
+                              pm.status <> 'complete' AND pm.unavailable_at IS NULL
+                            )
+                          )
+                        """,
+                        (player["id"],),
+                    ).fetchone()[0]
+                    if incomplete:
+                        conn.execute(
+                            """
+                            UPDATE players SET full_crawl_completed_at = NULL,
+                                updated_at = ? WHERE id = ?
+                            """,
+                            (self._now(), player["id"]),
+                        )
         finally:
             conn.close()
         return selected
@@ -973,28 +1297,291 @@ class CrawlerStore:
         finally:
             conn.close()
 
+    def rebuild_partner_probe_queue(
+        self, *, run_started_at, sampler_version, run_id=None
+    ):
+        """Replace unfinished probe work with one recent sample per player-year."""
+        cutoff = eligibility_cutoff(run_started_at)
+        now = self._now()
+        conn = self._connection()
+        try:
+            with conn:
+                leased = conn.execute(
+                    """
+                    SELECT COUNT(*) FROM crawl_jobs
+                    WHERE type = 'partner_probe' AND status = 'leased'
+                    """
+                ).fetchone()[0]
+                if leased:
+                    raise RuntimeError(
+                        "cannot rebuild partner probes while a probe job is leased"
+                    )
+
+                removed = conn.execute(
+                    """
+                    DELETE FROM crawl_jobs
+                    WHERE type = 'partner_probe' AND status <> 'complete'
+                    """
+                ).rowcount
+                conn.execute(
+                    "DELETE FROM partner_year_samples WHERE sampler_version = ?",
+                    (sampler_version,),
+                )
+
+                eligible_players = conn.execute(
+                    """
+                    SELECT COUNT(*) FROM players
+                    WHERE state = 'eligible'
+                      AND full_crawl_completed_at IS NOT NULL
+                    """
+                ).fetchone()[0]
+                rows = conn.execute(
+                    """
+                    SELECT p.id AS player_id, p.username, g.uuid,
+                           g.numeric_id,
+                           CAST(strftime('%Y', g.end_time, 'unixepoch') AS INTEGER)
+                               AS game_year
+                    FROM players p
+                    JOIN game_participants gp ON gp.player_id = p.id
+                    JOIN games g ON g.uuid = gp.game_uuid
+                    WHERE p.state = 'eligible'
+                      AND p.full_crawl_completed_at IS NOT NULL
+                      AND g.source = 'public'
+                      AND gp.rating_source = 'public'
+                      AND g.end_time >= ?
+                    ORDER BY p.username, game_year, g.uuid
+                    """,
+                    (cutoff,),
+                ).fetchall()
+
+                grouped = {}
+                for row in rows:
+                    key = (row["player_id"], row["username"], row["game_year"])
+                    grouped.setdefault(key, []).append(dict(row))
+
+                queued = 0
+                reused = 0
+                for (player_id, username, year), games in grouped.items():
+                    sample = select_partner_year_sample(
+                        games, username, year, sampler_version
+                    )
+                    conn.execute(
+                        """
+                        INSERT INTO partner_year_samples
+                            (player_id, year, sampler_version, board_uuid,
+                             eligibility_cutoff, run_id, selected_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            player_id,
+                            year,
+                            sampler_version,
+                            sample["uuid"],
+                            cutoff,
+                            run_id,
+                            now,
+                        ),
+                    )
+                    reference = (
+                        str(sample["numeric_id"])
+                        if sample["numeric_id"] is not None
+                        else sample["uuid"]
+                    )
+                    created = self._enqueue(
+                        conn,
+                        f"partner:{sample['uuid']}",
+                        "partner_probe",
+                        {
+                            "board_uuid": sample["uuid"],
+                            "reference": reference,
+                            "username": username,
+                            "year": year,
+                            "sampler_version": sampler_version,
+                            "eligibility_cutoff": cutoff,
+                        },
+                        max_attempts=4,
+                        run_id=run_id,
+                    )
+                    if created:
+                        queued += 1
+                    else:
+                        reused += 1
+
+                return {
+                    "removed_jobs": removed,
+                    "eligible_players": eligible_players,
+                    "samples": len(grouped),
+                    "queued_jobs": queued,
+                    "reused_jobs": reused,
+                }
+        finally:
+            conn.close()
+
+    def schedule_partner_year_probes(
+        self, username, *, run_started_at, sampler_version, run_id=None
+    ):
+        """Ensure a fully crawled eligible player has one recent probe per year."""
+        normalized = normalize_username(username)
+        cutoff = eligibility_cutoff(run_started_at)
+        now = self._now()
+        conn = self._connection()
+        try:
+            with conn:
+                player = conn.execute(
+                    """
+                    SELECT id, username FROM players
+                    WHERE username = ? AND state = 'eligible'
+                      AND full_crawl_completed_at IS NOT NULL
+                    """,
+                    (normalized,),
+                ).fetchone()
+                if player is None:
+                    return {
+                        "samples": 0,
+                        "queued_jobs": 0,
+                        "reused_jobs": 0,
+                    }
+
+                rows = conn.execute(
+                    """
+                    SELECT g.uuid, g.numeric_id,
+                           CAST(strftime('%Y', g.end_time, 'unixepoch') AS INTEGER)
+                               AS game_year
+                    FROM game_participants gp
+                    JOIN games g ON g.uuid = gp.game_uuid
+                    WHERE gp.player_id = ?
+                      AND gp.rating_source = 'public'
+                      AND g.source = 'public'
+                      AND g.end_time >= ?
+                    ORDER BY game_year, g.uuid
+                    """,
+                    (player["id"], cutoff),
+                ).fetchall()
+                grouped = {}
+                for row in rows:
+                    grouped.setdefault(row["game_year"], []).append(dict(row))
+
+                created_samples = 0
+                queued = 0
+                reused = 0
+                for year, games in grouped.items():
+                    existing = conn.execute(
+                        """
+                        SELECT pys.board_uuid, g.numeric_id
+                        FROM partner_year_samples pys
+                        JOIN games g ON g.uuid = pys.board_uuid
+                        WHERE pys.player_id = ? AND pys.year = ?
+                          AND pys.sampler_version = ?
+                        """,
+                        (player["id"], year, sampler_version),
+                    ).fetchone()
+                    if existing is None:
+                        sample = select_partner_year_sample(
+                            games, normalized, year, sampler_version
+                        )
+                        conn.execute(
+                            """
+                            INSERT INTO partner_year_samples
+                                (player_id, year, sampler_version, board_uuid,
+                                 eligibility_cutoff, run_id, selected_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                player["id"],
+                                year,
+                                sampler_version,
+                                sample["uuid"],
+                                cutoff,
+                                run_id,
+                                now,
+                            ),
+                        )
+                        created_samples += 1
+                    else:
+                        sample = dict(existing)
+                        sample["uuid"] = sample.pop("board_uuid")
+
+                    reference = (
+                        str(sample["numeric_id"])
+                        if sample["numeric_id"] is not None
+                        else sample["uuid"]
+                    )
+                    if self._enqueue(
+                        conn,
+                        f"partner:{sample['uuid']}",
+                        "partner_probe",
+                        {
+                            "board_uuid": sample["uuid"],
+                            "reference": reference,
+                            "username": normalized,
+                            "year": year,
+                            "sampler_version": sampler_version,
+                            "eligibility_cutoff": cutoff,
+                        },
+                        max_attempts=4,
+                        run_id=run_id,
+                    ):
+                        queued += 1
+                    else:
+                        reused += 1
+
+                return {
+                    "samples": created_samples,
+                    "queued_jobs": queued,
+                    "reused_jobs": reused,
+                }
+        finally:
+            conn.close()
+
     def mark_full_crawl_completed_if_done(self, username):
         normalized = normalize_username(username)
         conn = self._connection()
         try:
             with conn:
-                pending = conn.execute(
+                player = conn.execute(
                     """
-                    SELECT COUNT(*)
-                    FROM player_months pm JOIN players p ON p.id = pm.player_id
-                    WHERE p.username = ? AND pm.status <> 'complete'
+                    SELECT id, full_archive_list_fetched_at FROM players
+                    WHERE username = ?
                     """,
                     (normalized,),
-                ).fetchone()[0]
+                ).fetchone()
+                if player is None:
+                    return False
+                if player["full_archive_list_fetched_at"] is None:
+                    pending = conn.execute(
+                        """
+                        SELECT COUNT(*) FROM player_months
+                        WHERE player_id = ? AND status <> 'complete'
+                        """,
+                        (player["id"],),
+                    ).fetchone()[0]
+                else:
+                    pending = conn.execute(
+                        """
+                        SELECT COUNT(*)
+                        FROM player_archive_month_manifest manifest
+                        LEFT JOIN player_months pm
+                          ON pm.player_id = manifest.player_id
+                         AND pm.year = manifest.year AND pm.month = manifest.month
+                        WHERE manifest.player_id = ?
+                          AND (
+                            pm.player_id IS NULL OR (
+                              pm.status <> 'complete' AND pm.unavailable_at IS NULL
+                            )
+                          )
+                        """,
+                        (player["id"],),
+                    ).fetchone()[0]
                 if pending == 0:
-                    conn.execute(
+                    cursor = conn.execute(
                         """
                         UPDATE players SET full_crawl_completed_at = ?, updated_at = ?
                         WHERE username = ? AND state = 'eligible'
+                          AND full_crawl_completed_at IS NULL
                         """,
                         (self._now(), self._now(), normalized),
                     )
-                    return True
+                    return cursor.rowcount == 1
                 return False
         finally:
             conn.close()
@@ -1081,15 +1668,6 @@ class CrawlerStore:
                       )
                     """
                 )
-                conn.execute(
-                    """
-                    DELETE FROM player_months
-                    WHERE status <> 'complete'
-                      AND player_id IN (
-                        SELECT id FROM players WHERE state = 'dormant'
-                      )
-                    """
-                )
                 return len(eligible_before & dormant_ids)
         finally:
             conn.close()
@@ -1113,10 +1691,21 @@ class CrawlerStore:
                 rows = list(
                     conn.execute(
                         "SELECT id, username FROM players WHERE state = 'eligible' "
+                        "AND archive_unavailable_at IS NULL "
                         "ORDER BY username"
                     )
                 )
+                queued = []
                 for player in rows:
+                    terminal = conn.execute(
+                        """
+                        SELECT unavailable_at FROM player_months
+                        WHERE player_id = ? AND year = ? AND month = ?
+                        """,
+                        (player["id"], year, month),
+                    ).fetchone()
+                    if terminal and terminal["unavailable_at"] is not None:
+                        continue
                     conn.execute(
                         """
                         INSERT INTO player_months (player_id, year, month, status)
@@ -1159,7 +1748,8 @@ class CrawlerStore:
                             now,
                         ),
                     )
-                return [row["username"] for row in rows]
+                    queued.append(player["username"])
+                return queued
         finally:
             conn.close()
 

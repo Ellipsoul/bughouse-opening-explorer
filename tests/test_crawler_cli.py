@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from click.testing import CliRunner
 
@@ -36,6 +36,63 @@ def test_crawl_migrate_and_seed_commands_initialize_the_sqlite_queue(tmp_path):
         assert conn.execute("SELECT COUNT(*) FROM crawl_jobs").fetchone()[0] == 1
     finally:
         conn.close()
+
+
+def test_rebuild_probes_uses_the_existing_runs_eligibility_cutoff(tmp_path):
+    path = str(tmp_path / "crawler.db")
+    apply_migrations(path)
+    store = CrawlerStore(path)
+    run_id = store.start_run("bootstrap", {"sampler_version": 1})
+    store.finish_run(run_id, "stopped")
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "crawl",
+            "--crawler-db",
+            path,
+            "rebuild-probes",
+            run_id,
+            "--sampler-version",
+            "2",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Rebuilt partner probes for sampler version 2" in result.output
+    assert '"removed_jobs": 0' in result.output
+
+
+def test_reconcile_command_restores_stranded_player_work(tmp_path):
+    path = str(tmp_path / "crawler.db")
+    apply_migrations(path)
+    store = CrawlerStore(path)
+    now = datetime.now(timezone.utc)
+    store.save_public_month(
+        "larso",
+        now.year,
+        now.month,
+        [{
+            "uuid": "00000000-0000-0000-0000-000000000052",
+            "url": "https://www.chess.com/game/live/123456789052",
+            "rules": "bughouse",
+            "end_time": int(now.timestamp()),
+            "white": {"username": "larso", "rating": 2000, "result": "win"},
+            "black": {"username": "other", "rating": 1500, "result": "loss"},
+        }],
+        run_started_at=now,
+    )
+    archive = store.lease_job("setup-worker")
+    store.complete_job(archive.id, {"months": 1})
+    run_id = store.start_run("bootstrap")
+    store.finish_run(run_id, "stopped")
+
+    result = CliRunner().invoke(
+        main, ["crawl", "--crawler-db", path, "reconcile", run_id]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert '"requeued_archive_lists": 1' in result.output
 
 
 def test_bounded_bootstrap_requeues_the_current_partial_month(tmp_path):
@@ -258,3 +315,64 @@ def test_resume_applies_the_current_eligibility_policy_before_work(tmp_path):
     assert result.exit_code == 0, result.output
     assert "Marked 1 player(s) dormant under the current eligibility policy" in result.output
     assert store.status()["players"]["dormant"] == 1
+
+
+def test_explicit_resume_keeps_the_original_runs_eligibility_cutoff(tmp_path):
+    path = str(tmp_path / "crawler.db")
+    apply_migrations(path)
+    store = CrawlerStore(path)
+    now = datetime.now(timezone.utc)
+    original_start = now - timedelta(days=30)
+    observation = now.replace(year=now.year - 1) - timedelta(days=15)
+    store.save_public_month(
+        "larso",
+        observation.year,
+        observation.month,
+        [{
+            "uuid": "00000000-0000-0000-0000-000000000051",
+            "url": "https://www.chess.com/game/live/123456789051",
+            "rules": "bughouse",
+            "end_time": int(observation.timestamp()),
+            "white": {"username": "larso", "rating": 2000, "result": "win"},
+            "black": {"username": "other", "rating": 1500, "result": "loss"},
+        }],
+        run_started_at=original_start,
+    )
+    run_id = store.start_run("bootstrap")
+    conn = store._connection()
+    try:
+        with conn:
+            conn.execute(
+                "UPDATE crawl_runs SET started_at = ?, status = 'stopped' WHERE id = ?",
+                (int(original_start.timestamp()), run_id),
+            )
+    finally:
+        conn.close()
+
+    result = CliRunner().invoke(
+        main,
+        ["crawl", "--crawler-db", path, "resume", run_id, "--max-jobs", "0"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert store.status()["players"]["eligible"] == 1
+    assert store.status()["players"]["dormant"] == 0
+
+
+def test_idle_run_with_failed_work_is_not_reported_complete(tmp_path):
+    path = str(tmp_path / "crawler.db")
+    apply_migrations(path)
+    store = CrawlerStore(path)
+    store.seed_usernames(["larso"])
+    job = store.lease_job("setup-worker")
+    store.fail_job(job.id, "unexpected schema change")
+    run_id = store.start_run("bootstrap")
+    store.finish_run(run_id, "stopped")
+
+    result = CliRunner().invoke(
+        main,
+        ["crawl", "--crawler-db", path, "resume", run_id, "--max-jobs", "0"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert store.get_run(run_id)["status"] == "stopped"

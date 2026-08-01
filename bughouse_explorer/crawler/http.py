@@ -37,6 +37,10 @@ class PlayerNotFound(PermanentHttpError):
     pass
 
 
+class ArchiveMonthNotFound(PermanentHttpError):
+    pass
+
+
 class CallbackNotFound(PermanentHttpError):
     pass
 
@@ -187,7 +191,9 @@ class ChessComCrawlerClient:
             f"{PUB_BASE}/player/{username.strip().lower()}/games/"
             f"{year:04d}/{month:02d}"
         )
-        response = self._get(url, headers=headers)
+        response = self._get(
+            url, headers=headers, not_found_error=ArchiveMonthNotFound
+        )
         return FetchResult(
             data=None if response.status_code == 304 else response.json(),
             etag=response.headers.get("ETag"),

@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from bughouse_explorer.crawler.domain import (
     is_qualifying_observation,
     normalize_username,
-    select_partner_samples,
+    select_partner_year_sample,
 )
 
 
@@ -13,21 +13,21 @@ def _games(count):
     ]
 
 
-def test_adaptive_partner_sampling_uses_the_configured_volume_bands():
-    assert len(select_partner_samples(_games(4), "larso", 2026, 7, 1)) == 4
-    assert len(select_partner_samples(_games(5), "larso", 2026, 7, 1)) == 2
-    assert len(select_partner_samples(_games(20), "larso", 2026, 7, 1)) == 2
-    assert len(select_partner_samples(_games(21), "larso", 2026, 7, 1)) == 1
+def test_annual_partner_sampling_selects_exactly_one_board():
+    selected = select_partner_year_sample(_games(100), "larso", 2026, 2)
+
+    assert selected in _games(100)
 
 
-def test_medium_month_sampling_is_stable_and_spans_both_chronological_halves():
-    games = _games(10)
-    first = select_partner_samples(games, "Larso", 2026, 7, 1)
-    resumed = select_partner_samples(list(reversed(games)), "larso", 2026, 7, 1)
+def test_annual_sampling_is_stable_across_order_and_changes_with_policy_version():
+    games = _games(20)
+    first = select_partner_year_sample(games, "Larso", 2026, 2)
+    resumed = select_partner_year_sample(list(reversed(games)), "larso", 2026, 2)
+    next_version = select_partner_year_sample(games, "larso", 2026, 3)
 
     assert first == resumed
-    assert first[0] in games[:5]
-    assert first[1] in games[5:]
+    assert first["uuid"] == "game-01"
+    assert next_version["uuid"] == "game-11"
 
 
 def test_eligibility_is_inclusive_and_uses_a_one_calendar_year_window():

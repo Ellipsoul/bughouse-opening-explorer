@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import json
+import signal
 import time
 
 import click
@@ -16,6 +17,14 @@ from .store import CrawlerStore
 from .worker import CrawlWorker
 
 
+class GracefulTermination(Exception):
+    """Raised by SIGTERM so the durable run can record a clean stop."""
+
+
+def _raise_graceful_termination(_signum, _frame):
+    raise GracefulTermination()
+
+
 def _config(database_path):
     env = CrawlerConfig.from_env()
     return CrawlerConfig(
@@ -23,6 +32,7 @@ def _config(database_path):
         user_agent=env.user_agent,
         min_interval_ms=env.min_interval_ms,
         sampler_version=env.sampler_version,
+        max_consecutive_errors=env.max_consecutive_errors,
     )
 
 
@@ -46,6 +56,7 @@ def _worker(store, config, *, run_started_at=None, run_id=None):
         client,
         run_started_at=run_started_at,
         sampler_version=config.sampler_version,
+        max_consecutive_errors=config.max_consecutive_errors,
         worker_id="cli-worker",
         run_id=run_id,
         progress=_print_progress,
@@ -168,6 +179,20 @@ def _print_status(status, as_json=False):
         click.echo(f"Current: {current['type']} {current['payload']}")
     if status["latest_error"]:
         click.echo(f"Latest error: {status['latest_error']['details']}")
+    terminal = status["terminal"]
+    click.echo(
+        "Terminal outcomes: "
+        f"{terminal['unavailable_months']} unavailable months, "
+        f"{terminal['unavailable_archives']} unavailable archives, "
+        f"{terminal['unresolved_probes']} unresolved probes"
+    )
+    closure = status["closure"]
+    click.echo(
+        "Closure audit: "
+        f"{'ready' if closure['ready'] else 'incomplete'}; "
+        f"{closure['eligible_without_outcome']} eligible players without outcome, "
+        f"{closure['failed_jobs']} failed jobs"
+    )
 
 
 @click.group()
@@ -205,6 +230,55 @@ def seed_command(ctx, usernames):
     click.echo(f"Seeded {len({value.lower() for value in values})} player(s) in {path}")
 
 
+@crawl.command("rebuild-probes")
+@click.argument("run_id", required=False)
+@click.option(
+    "--sampler-version",
+    type=click.IntRange(min=1),
+    default=None,
+    help="Annual sampler policy version; defaults to BUGHOUSE_SAMPLER_VERSION.",
+)
+@click.pass_context
+def rebuild_probes_command(ctx, run_id, sampler_version):
+    """Replace unfinished legacy probes with recent annual samples."""
+    path = ctx.obj["database_path"]
+    config = _config(path)
+    store = _store(path)
+    if run_id is None:
+        started = datetime.now(timezone.utc)
+    else:
+        run = store.get_run(run_id)
+        if run["status"] == "running":
+            raise click.ClickException(
+                "stop the selected crawl run before rebuilding its probe queue"
+            )
+        started = datetime.fromtimestamp(run["started_at"], tz=timezone.utc)
+    version = sampler_version or config.sampler_version
+    rebuilt = store.rebuild_partner_probe_queue(
+        run_started_at=started,
+        sampler_version=version,
+        run_id=run_id,
+    )
+    click.echo(f"Rebuilt partner probes for sampler version {version}")
+    click.echo(json.dumps(rebuilt, sort_keys=True))
+
+
+@crawl.command("reconcile")
+@click.argument("run_id", required=False)
+@click.pass_context
+def reconcile_command(ctx, run_id):
+    """Reconcile terminal 404s and restore missing durable completion work."""
+    store = _store(ctx.obj["database_path"])
+    if run_id is not None:
+        run = store.get_run(run_id)
+        if run["status"] == "running":
+            raise click.ClickException(
+                "stop the selected crawl run before reconciling its queue"
+            )
+    result = store.reconcile_crawl_state(run_id=run_id)
+    click.echo(json.dumps(result, sort_keys=True))
+
+
 def _run(store, config, run_id, run_started_at, max_jobs, max_players=None):
     discarded = store.discard_pre_bughouse_month_work()
     if discarded["jobs"]:
@@ -215,16 +289,38 @@ def _run(store, config, run_id, run_started_at, max_jobs, max_players=None):
     worker = _worker(
         store, config, run_started_at=run_started_at, run_id=run_id
     )
+    old_sigterm = None
+    try:
+        old_sigterm = signal.getsignal(signal.SIGTERM)
+        signal.signal(signal.SIGTERM, _raise_graceful_termination)
+    except (AttributeError, ValueError):
+        old_sigterm = None
     try:
         result = worker.run_until_idle(
             max_jobs=max_jobs, max_players=max_players
         )
+    except GracefulTermination:
+        store.finish_run(run_id, "stopped", "terminated")
+        click.echo("Crawler stopped gracefully after SIGTERM")
+        return
     except KeyboardInterrupt:
         store.finish_run(run_id, "stopped", "interrupted")
         raise click.Abort()
+    finally:
+        if old_sigterm is not None:
+            signal.signal(signal.SIGTERM, old_sigterm)
     status = store.status()
-    unfinished = status["jobs"]["queued"] + status["jobs"]["leased"] + status["jobs"]["deferred"]
-    store.finish_run(run_id, "stopped" if unfinished else "complete")
+    closure = status["closure"]
+    stop_reason = (
+        "failure circuit breaker tripped"
+        if result["circuit_breaker_tripped"]
+        else "closure audit incomplete"
+    )
+    store.finish_run(
+        run_id,
+        "complete" if closure["ready"] else "stopped",
+        None if closure["ready"] else stop_reason,
+    )
     click.echo(json.dumps(result, sort_keys=True))
     _print_status(store.status())
 
@@ -318,7 +414,7 @@ def resume_command(ctx, run_id, max_jobs, max_players):
     else:
         run = store.resume_run(run_id)
         started = datetime.fromtimestamp(run["started_at"], tz=timezone.utc)
-    _apply_eligibility_policy(store, datetime.now(timezone.utc))
+    _apply_eligibility_policy(store, started)
     current = store.queue_current_month_refresh(
         datetime.now(timezone.utc), run_id=run_id
     )

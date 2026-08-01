@@ -5,6 +5,10 @@ def test_crawler_uses_a_100ms_serial_request_interval_by_default():
     assert CrawlerConfig.from_env({}).min_interval_ms == 100
 
 
+def test_crawler_uses_the_annual_partner_sampler_by_default():
+    assert CrawlerConfig.from_env({}).sampler_version == 2
+
+
 def test_default_user_agent_identifies_the_operator_contact():
     assert "aronteh.chess@gmail.com" in CrawlerConfig.from_env({}).user_agent
 

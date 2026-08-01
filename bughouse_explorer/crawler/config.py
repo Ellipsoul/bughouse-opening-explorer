@@ -16,7 +16,8 @@ class CrawlerConfig:
     database_path: str = "data/crawler.db"
     user_agent: str = DEFAULT_USER_AGENT
     min_interval_ms: int = 100
-    sampler_version: int = 1
+    sampler_version: int = 2
+    max_consecutive_errors: int = 5
 
     @classmethod
     def from_env(cls, environ=None):
@@ -25,5 +26,8 @@ class CrawlerConfig:
             database_path=env.get("BUGHOUSE_CRAWLER_DB", "data/crawler.db"),
             user_agent=env.get("CHESSCOM_USER_AGENT", DEFAULT_USER_AGENT),
             min_interval_ms=int(env.get("CHESSCOM_MIN_INTERVAL_MS", "100")),
-            sampler_version=int(env.get("BUGHOUSE_SAMPLER_VERSION", "1")),
+            sampler_version=int(env.get("BUGHOUSE_SAMPLER_VERSION", "2")),
+            max_consecutive_errors=max(
+                1, int(env.get("BUGHOUSE_MAX_CONSECUTIVE_ERRORS", "5"))
+            ),
         )

@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from .http import (
+    ArchiveMonthNotFound,
     CallbackNotFound,
     DeferredHttpError,
     PermanentHttpError,
@@ -19,10 +20,11 @@ class CrawlWorker:
         client,
         *,
         run_started_at=None,
-        sampler_version=1,
+        sampler_version=2,
         worker_id="crawler",
         run_id=None,
         progress=None,
+        max_consecutive_errors=5,
     ):
         self.store = store
         self.client = client
@@ -31,6 +33,7 @@ class CrawlWorker:
         self.worker_id = worker_id
         self.run_id = run_id
         self.progress = progress
+        self.max_consecutive_errors = max_consecutive_errors
 
     def _report(self, event, job, *, details=None, error=None):
         if self.progress is None:
@@ -54,8 +57,11 @@ class CrawlWorker:
             "completed": 0,
             "deferred": 0,
             "failed": 0,
+            "terminal": 0,
             "limit_reached": False,
+            "circuit_breaker_tripped": False,
         }
+        consecutive_errors = 0
         while max_jobs is None or result["processed"] < max_jobs:
             if (
                 max_players is not None
@@ -70,12 +76,32 @@ class CrawlWorker:
             self.store.heartbeat(self.run_id) if self.run_id else None
             result["processed"] += 1
             self._report("START", job)
+            outcome_is_error = False
             try:
                 details = self._process(job)
+            except ArchiveMonthNotFound as exc:
+                self.store.mark_month_terminal_unavailable(job.id, exc)
+                self.store.mark_full_crawl_completed_if_done(
+                    job.payload["username"]
+                )
+                result["terminal"] += 1
+                self._report("TERMINAL", job, error=exc)
+            except PlayerNotFound as exc:
+                self.store.mark_archive_terminal_unavailable(job.id, exc)
+                result["terminal"] += 1
+                self._report("TERMINAL", job, error=exc)
             except CallbackNotFound as exc:
-                status = self.store.defer_job(job.id, exc, delay_seconds=86_400)
-                result[status] += 1
-                self._report(status.upper(), job, error=exc)
+                if job.attempts >= job.max_attempts:
+                    self.store.mark_probe_terminal_unresolved(job.id, exc)
+                    result["terminal"] += 1
+                    self._report("TERMINAL", job, error=exc)
+                else:
+                    status = self.store.defer_job(
+                        job.id, exc, delay_seconds=86_400
+                    )
+                    result[status] += 1
+                    self._report(status.upper(), job, error=exc)
+                    outcome_is_error = True
             except DeferredHttpError as exc:
                 status = self.store.defer_job(
                     job.id,
@@ -85,18 +111,28 @@ class CrawlWorker:
                 )
                 result[status] += 1
                 self._report(status.upper(), job, error=exc)
-            except (PlayerNotFound, PermanentHttpError, ValueError) as exc:
+                outcome_is_error = True
+            except (PermanentHttpError, ValueError) as exc:
                 self.store.fail_job(job.id, exc)
                 result["failed"] += 1
                 self._report("FAILED", job, error=exc)
+                outcome_is_error = True
             except Exception as exc:
                 self.store.fail_job(job.id, exc)
                 result["failed"] += 1
                 self._report("FAILED", job, error=exc)
+                outcome_is_error = True
             else:
                 self.store.complete_job(job.id, details)
                 result["completed"] += 1
                 self._report("DONE", job, details=details)
+            if outcome_is_error:
+                consecutive_errors += 1
+                if consecutive_errors >= self.max_consecutive_errors:
+                    result["circuit_breaker_tripped"] = True
+                    break
+            else:
+                consecutive_errors = 0
         return result
 
     def _process(self, job):
@@ -120,9 +156,22 @@ class CrawlWorker:
             run_started_at=self.run_started_at,
             run_id=self.run_id or job.run_id,
         )
+        probes = 0
         if mode == "full":
-            self.store.mark_full_crawl_completed_if_done(username)
-        return {"username": username, "mode": mode, "months": len(scheduled)}
+            completed = self.store.mark_full_crawl_completed_if_done(username)
+            if completed:
+                probes = self.store.schedule_partner_year_probes(
+                    username,
+                    run_started_at=self.run_started_at,
+                    sampler_version=self.sampler_version,
+                    run_id=self.run_id or job.run_id,
+                )["queued_jobs"]
+        return {
+            "username": username,
+            "mode": mode,
+            "months": len(scheduled),
+            "probes": probes,
+        }
 
     def _month(self, job):
         username = job.payload["username"]
@@ -153,8 +202,19 @@ class CrawlWorker:
                 sampler_version=self.sampler_version,
                 run_id=self.run_id or job.run_id,
             )
-        if job.payload.get("mode") == "full":
-            self.store.mark_full_crawl_completed_if_done(username)
+        mode = job.payload.get("mode")
+        should_schedule_probes = mode == "monthly"
+        if mode == "full":
+            should_schedule_probes = self.store.mark_full_crawl_completed_if_done(
+                username
+            )
+        if should_schedule_probes:
+            summary["probes"] += self.store.schedule_partner_year_probes(
+                username,
+                run_started_at=self.run_started_at,
+                sampler_version=self.sampler_version,
+                run_id=self.run_id or job.run_id,
+            )["queued_jobs"]
         return {"username": username, "year": year, "month": month, **summary}
 
     def _partner_probe(self, job):
