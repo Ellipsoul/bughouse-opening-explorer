@@ -19,6 +19,7 @@ install -d -o bughouse-crawler -g bughouse-crawler -m 0750 /opt/bughouse/data
 install -d -o root -g bughouse-crawler -m 0750 /etc/bughouse
 install -o root -g bughouse-crawler -m 0640 deploy/crawler.env.example /etc/bughouse/crawler.env
 # Override CHESSCOM_USER_AGENT if this deployment has a different operator.
+# Set BUGHOUSE_RUN_ID before a multi-day continuation that must keep its cutoff.
 ```
 
 Install/migrate the application and start the initial crawl manually:
@@ -35,8 +36,10 @@ systemctl start bughouse-crawler.service
 systemctl enable --now bughouse-crawler-monthly.timer
 ```
 
-The bootstrap service exits when the currently available queue is idle. Starting it again is safe;
-all seeds, months, games, and probes are idempotent. Inspect it without mutating state with:
+The service runs `crawl resume "$BUGHOUSE_RUN_ID"` when that variable is set;
+otherwise it starts a bootstrap run. It restarts after crashes but not after a
+graceful stop or the crawler's failure circuit breaker. All seeds, months,
+games, and probes are idempotent. Inspect it without mutating state with:
 
 ```sh
 sudo -u bughouse-crawler /opt/bughouse/venv/bin/bughouse-explorer \

@@ -9,8 +9,10 @@ User=bughouse-crawler
 Group=bughouse-crawler
 WorkingDirectory=/opt/bughouse/app
 EnvironmentFile=/etc/bughouse/crawler.env
-ExecStart=/usr/bin/flock --wait 60 /opt/bughouse/data/crawler.lock /opt/bughouse/venv/bin/bughouse-explorer crawl bootstrap
+ExecStart=/usr/bin/flock --wait 60 /opt/bughouse/data/crawler.lock /opt/bughouse/app/deploy/run-crawler.sh
 TimeoutStartSec=infinity
+Restart=on-failure
+RestartSec=30
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
@@ -20,4 +22,3 @@ ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
 ReadWritePaths=/opt/bughouse/data
-
