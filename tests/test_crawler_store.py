@@ -1,8 +1,9 @@
 from datetime import datetime, timezone
+import sqlite3
 
 import pytest
 
-from bughouse_explorer.crawler.migrations import apply_migrations
+from bughouse_explorer.crawler.migrations import MIGRATIONS_DIR, apply_migrations
 from bughouse_explorer.crawler.store import CrawlerStore
 
 
@@ -11,6 +12,96 @@ def store(tmp_path):
     path = str(tmp_path / "crawler.db")
     apply_migrations(path)
     return CrawlerStore(path)
+
+
+def test_permanent_tracking_migration_enrolls_only_currently_eligible_players(tmp_path):
+    path = str(tmp_path / "legacy.db")
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute(
+            "CREATE TABLE crawler_schema_migrations "
+            "(version TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)"
+        )
+        for migration in sorted(MIGRATIONS_DIR.glob("000[1-3]_*.sql")):
+            conn.executescript(migration.read_text())
+            conn.execute(
+                "INSERT INTO crawler_schema_migrations VALUES (?, 1)",
+                (migration.name,),
+            )
+        conn.executemany(
+            """
+            INSERT INTO players
+                (username, display_username, state, discovery_source,
+                 discovered_at, qualifying_at, updated_at)
+            VALUES (?, ?, ?, 'test', ?, ?, ?)
+            """,
+            [
+                ("eligible", "Eligible", "eligible", 10, 20, 30),
+                ("dormant", "Dormant", "dormant", 11, None, 31),
+                ("candidate", "Candidate", "candidate", 12, None, 32),
+            ],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    apply_migrations(path)
+
+    conn = sqlite3.connect(path)
+    try:
+        tracked = dict(conn.execute(
+            "SELECT username, tracking_started_at FROM players ORDER BY username"
+        ))
+    finally:
+        conn.close()
+    assert tracked == {"candidate": None, "dormant": None, "eligible": 20}
+
+
+def test_corrective_migration_removes_only_the_legacy_dormant_backfill(tmp_path):
+    path = str(tmp_path / "legacy-0004.db")
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute(
+            "CREATE TABLE crawler_schema_migrations "
+            "(version TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)"
+        )
+        for migration in sorted(MIGRATIONS_DIR.glob("000[1-3]_*.sql")):
+            conn.executescript(migration.read_text())
+            conn.execute(
+                "INSERT INTO crawler_schema_migrations VALUES (?, 1)",
+                (migration.name,),
+            )
+        conn.execute("ALTER TABLE players ADD COLUMN tracking_started_at INTEGER")
+        conn.execute(
+            "INSERT INTO crawler_schema_migrations VALUES "
+            "('0004_permanent_player_tracking.sql', 100)"
+        )
+        conn.executemany(
+            """
+            INSERT INTO players
+                (username, display_username, state, discovery_source,
+                 discovered_at, updated_at, tracking_started_at)
+            VALUES (?, ?, 'dormant', 'test', ?, ?, ?)
+            """,
+            [
+                ("legacy-dormant", "Legacy Dormant", 10, 100, 10),
+                ("future-dormant", "Future Dormant", 101, 200, 101),
+            ],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    apply_migrations(path)
+
+    conn = sqlite3.connect(path)
+    try:
+        tracked = dict(conn.execute(
+            "SELECT username, tracking_started_at FROM players ORDER BY username"
+        ))
+    finally:
+        conn.close()
+    assert tracked == {"future-dormant": 101, "legacy-dormant": None}
 
 
 def test_seed_players_are_idempotent_and_make_durable_archive_jobs(store):
@@ -62,6 +153,35 @@ def test_reconciliation_requeues_an_eligible_player_with_no_completion_path(stor
     job = store.lease_job("test-worker")
     assert job.type == "archive_list"
     assert job.payload == {"username": "larso", "mode": "full"}
+
+
+def test_reconciliation_queues_manifest_backfill_without_refetching_known_months(store):
+    started = datetime(2026, 7, 31, tzinfo=timezone.utc)
+    store.save_public_month(
+        "larso",
+        2026,
+        7,
+        [{
+            "uuid": "00000000-0000-0000-0000-000000000097",
+            "url": "https://www.chess.com/game/live/123456789097",
+            "rules": "bughouse",
+            "end_time": int(datetime(2026, 7, 20, tzinfo=timezone.utc).timestamp()),
+            "white": {"username": "larso", "rating": 2000, "result": "win"},
+            "black": {"username": "other", "rating": 1500, "result": "loss"},
+        }],
+        run_started_at=started,
+    )
+    original_archive = store.lease_job("setup-worker")
+    store.complete_job(original_archive.id, {"months": 1})
+    assert store.mark_full_crawl_completed_if_done("larso") is True
+
+    result = store.reconcile_crawl_state()
+
+    assert result["requeued_manifest_backfills"] == 1
+    backfill = store.lease_job("test-worker")
+    assert backfill.type == "archive_list"
+    assert backfill.payload == {"username": "larso", "mode": "full"}
+    assert store.month_cache("larso", 2026, 7)["status"] == "complete"
 
 
 def test_reconciliation_converts_existing_public_month_404_to_terminal(store):
@@ -317,7 +437,40 @@ def test_eligibility_can_become_dormant_and_reactivate_on_a_later_game(store):
     assert reactivation["type"] == "archive_list"
 
 
-def test_policy_reevaluation_applies_the_current_rating_threshold(store):
+def test_dormant_tracked_player_can_complete_a_lifetime_crawl(store):
+    observed_at = int(datetime(2026, 7, 20, tzinfo=timezone.utc).timestamp())
+    started = datetime(2026, 7, 31, tzinfo=timezone.utc)
+    store.save_public_month(
+        "larso",
+        2026,
+        7,
+        [{
+            "uuid": "00000000-0000-0000-0000-000000000053",
+            "url": "https://www.chess.com/game/live/123456789053",
+            "rules": "bughouse",
+            "end_time": observed_at,
+            "white": {"username": "larso", "rating": 2000, "result": "win"},
+            "black": {"username": "other", "rating": 1500, "result": "loss"},
+        }],
+        run_started_at=started,
+    )
+    archive = store.lease_job("test-worker")
+    store.schedule_archive_months(
+        "larso", [(2026, 7)], mode="full", run_started_at=started
+    )
+    store.complete_job(archive.id)
+
+    store.reevaluate_dormancy(datetime(2028, 8, 1, tzinfo=timezone.utc))
+
+    assert store.mark_full_crawl_completed_if_done("larso") is True
+    status = store.status()
+    assert status["players"]["dormant"] == 1
+    assert status["fully_crawled_players"] == 1
+    assert status["closure"]["tracked_without_outcome"] == 0
+    assert status["closure"]["ready"] is True
+
+
+def test_policy_reevaluation_preserves_lifetime_work_for_tracked_player(store):
     observed_at = int(datetime(2026, 7, 20, tzinfo=timezone.utc).timestamp())
     store.save_public_month(
         "larso",
@@ -355,7 +508,9 @@ def test_policy_reevaluation_applies_the_current_rating_threshold(store):
 
     assert dormant == 1
     assert store.status()["players"]["dormant"] == 1
-    assert store.lease_job("worker") is None
+    job = store.lease_job("worker")
+    assert job.type == "archive_list"
+    assert job.payload == {"username": "larso", "mode": "full"}
 
 
 def test_policy_reevaluation_ignores_callback_profile_ratings(store):
@@ -406,7 +561,7 @@ def test_policy_reevaluation_ignores_callback_profile_ratings(store):
     assert store.status()["players"]["dormant"] == 1
 
 
-def test_monthly_refresh_queues_only_active_eligible_players(store):
+def test_monthly_refresh_keeps_once_qualified_dormant_players(store):
     end_time = int(datetime(2026, 7, 20, tzinfo=timezone.utc).timestamp())
     store.save_public_month(
         "larso",
@@ -429,6 +584,10 @@ def test_monthly_refresh_queues_only_active_eligible_players(store):
         run_started_at=datetime(2026, 7, 31, tzinfo=timezone.utc),
     )
 
+    store.reevaluate_dormancy(datetime(2028, 8, 1, tzinfo=timezone.utc))
+
+    assert store.status()["players"]["dormant"] == 1
+    assert store.status()["permanently_tracked_players"] == 1
     assert store.queue_monthly_refresh(2015, 12) == []
     assert store.month_cache("larso", 2015, 12) is None
     assert store.queue_monthly_refresh(2026, 8) == ["larso"]

@@ -321,6 +321,14 @@ class CrawlerStore:
         failed = conn.execute(
             "SELECT COUNT(*) FROM crawl_jobs WHERE status = 'failed'"
         ).fetchone()[0]
+        tracked_without_outcome = conn.execute(
+            """
+            SELECT COUNT(*) FROM players
+            WHERE tracking_started_at IS NOT NULL
+              AND full_crawl_completed_at IS NULL
+              AND archive_unavailable_at IS NULL
+            """
+        ).fetchone()[0]
         eligible_without_outcome = conn.execute(
             """
             SELECT COUNT(*) FROM players
@@ -331,18 +339,20 @@ class CrawlerStore:
         unavailable_archives = conn.execute(
             """
             SELECT COUNT(*) FROM players
-            WHERE state = 'eligible' AND archive_unavailable_at IS NOT NULL
+            WHERE tracking_started_at IS NOT NULL
+              AND archive_unavailable_at IS NOT NULL
             """
         ).fetchone()[0]
         result = {
             "remaining_jobs": remaining,
             "failed_jobs": failed,
+            "tracked_without_outcome": tracked_without_outcome,
             "eligible_without_outcome": eligible_without_outcome,
             "terminal_archive_players": unavailable_archives,
         }
         result["ready"] = not any(
             result[key]
-            for key in ("remaining_jobs", "failed_jobs", "eligible_without_outcome")
+            for key in ("remaining_jobs", "failed_jobs", "tracked_without_outcome")
         )
         return result
 
@@ -355,7 +365,7 @@ class CrawlerStore:
             conn.close()
 
     def reconcile_crawl_state(self, *, run_id=None):
-        """Restore durable work for eligible players that have no completion path."""
+        """Restore durable work and provenance for permanently tracked players."""
         conn = self._connection()
         try:
             failed_404s = list(
@@ -392,7 +402,7 @@ class CrawlerStore:
                     """
                     SELECT p.username
                     FROM players p
-                    WHERE p.state = 'eligible'
+                    WHERE p.tracking_started_at IS NOT NULL
                       AND p.full_crawl_completed_at IS NULL
                       AND p.archive_unavailable_at IS NULL
                       AND NOT EXISTS (
@@ -414,10 +424,32 @@ class CrawlerStore:
                         run_id=run_id,
                     ):
                         queued += 1
+                legacy_completions = list(conn.execute(
+                    """
+                    SELECT p.username
+                    FROM players p
+                    WHERE p.tracking_started_at IS NOT NULL
+                      AND p.full_crawl_completed_at IS NOT NULL
+                      AND p.full_archive_list_fetched_at IS NULL
+                      AND p.archive_unavailable_at IS NULL
+                    ORDER BY p.username
+                    """
+                ))
+                manifest_backfills = 0
+                for row in legacy_completions:
+                    if self._enqueue(
+                        conn,
+                        f"reconcile:manifest:{row['username']}:v4",
+                        "archive_list",
+                        {"username": row["username"], "mode": "full"},
+                        run_id=run_id,
+                    ):
+                        manifest_backfills += 1
                 return {
                     "terminalized_months": terminalized_months,
                     "terminalized_archives": terminalized_archives,
                     "requeued_archive_lists": queued,
+                    "requeued_manifest_backfills": manifest_backfills,
                 }
         finally:
             conn.close()
@@ -459,6 +491,9 @@ class CrawlerStore:
             fully_crawled = conn.execute(
                 "SELECT COUNT(*) FROM players "
                 "WHERE full_crawl_completed_at IS NOT NULL"
+            ).fetchone()[0]
+            permanently_tracked = conn.execute(
+                "SELECT COUNT(*) FROM players WHERE tracking_started_at IS NOT NULL"
             ).fetchone()[0]
             retries = conn.execute(
                 "SELECT COALESCE(SUM(MAX(attempts - 1, 0)), 0) FROM crawl_jobs"
@@ -516,6 +551,7 @@ class CrawlerStore:
             closure = self._closure_audit_connection(conn)
             return {
                 "players": players,
+                "permanently_tracked_players": permanently_tracked,
                 "fully_crawled_players": fully_crawled,
                 "jobs": jobs,
                 "terminal": terminal,
@@ -954,10 +990,12 @@ class CrawlerStore:
             """
             UPDATE players
             SET state = 'eligible', qualifying_rating = ?,
-                qualifying_game_uuid = ?, qualifying_at = ?, updated_at = ?
+                qualifying_game_uuid = ?, qualifying_at = ?,
+                tracking_started_at = COALESCE(tracking_started_at, ?),
+                updated_at = ?
             WHERE id = ? AND (qualifying_at IS NULL OR qualifying_at <= ?)
             """,
-            (rating, game_uuid, end_time, now, player["id"], end_time),
+            (rating, game_uuid, end_time, now, now, player["id"], end_time),
         )
         self._enqueue(
             conn,
@@ -1576,7 +1614,7 @@ class CrawlerStore:
                     cursor = conn.execute(
                         """
                         UPDATE players SET full_crawl_completed_at = ?, updated_at = ?
-                        WHERE username = ? AND state = 'eligible'
+                        WHERE username = ? AND tracking_started_at IS NOT NULL
                           AND full_crawl_completed_at IS NULL
                         """,
                         (self._now(), self._now(), normalized),
@@ -1587,7 +1625,7 @@ class CrawlerStore:
             conn.close()
 
     def reevaluate_dormancy(self, run_started_at):
-        """Pause players whose newest qualifying observation left the rolling window."""
+        """Update current eligibility without ending permanent game tracking."""
         cutoff = eligibility_cutoff(run_started_at)
         conn = self._connection()
         try:
@@ -1654,26 +1692,18 @@ class CrawlerStore:
                         self._now(),
                     ),
                 )
-                dormant = conn.execute(
-                    "SELECT id FROM players WHERE state = 'dormant'"
-                ).fetchall()
-                dormant_ids = {row["id"] for row in dormant}
-                conn.execute(
-                    """
-                    DELETE FROM crawl_jobs
-                    WHERE status <> 'complete'
-                      AND type IN ('archive_list', 'month')
-                      AND json_extract(payload, '$.username') IN (
-                        SELECT username FROM players WHERE state = 'dormant'
-                      )
-                    """
-                )
+                dormant_ids = {
+                    row["id"]
+                    for row in conn.execute(
+                        "SELECT id FROM players WHERE state = 'dormant'"
+                    )
+                }
                 return len(eligible_before & dormant_ids)
         finally:
             conn.close()
 
     def queue_current_month_refresh(self, run_started_at, *, run_id=None):
-        """Requeue the still-changing UTC calendar month for active players."""
+        """Requeue the still-changing UTC month for permanently tracked players."""
         if run_started_at.tzinfo is None:
             run_started_at = run_started_at.replace(tzinfo=timezone.utc)
         current = run_started_at.astimezone(timezone.utc)
@@ -1682,7 +1712,7 @@ class CrawlerStore:
         )
 
     def queue_monthly_refresh(self, year, month, *, run_id=None):
-        """Queue a calendar month for every active eligible player."""
+        """Queue a calendar month for every permanently tracked player."""
         if (year, month) < BUGHOUSE_START_MONTH:
             return []
         conn = self._connection()
@@ -1690,7 +1720,8 @@ class CrawlerStore:
             with conn:
                 rows = list(
                     conn.execute(
-                        "SELECT id, username FROM players WHERE state = 'eligible' "
+                        "SELECT id, username FROM players "
+                        "WHERE tracking_started_at IS NOT NULL "
                         "AND archive_unavailable_at IS NULL "
                         "ORDER BY username"
                     )

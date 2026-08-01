@@ -37,9 +37,19 @@ appears.
 Every public board records both players. A callback rating can qualify a player
 only when it came from a timestamped `WhiteElo` or `BlackElo` PGN header; a
 callback profile rating is stored but does not qualify. Candidates can qualify
-on any later encounter. Eligible players whose newest qualifying evidence falls
-outside the window become dormant during the monthly run; stored history is
-retained, and later qualifying evidence reactivates them.
+on any later encounter. Once a candidate qualifies, `tracking_started_at`
+permanently enrolls that player in lifetime and monthly game collection.
+Eligible players whose newest qualifying evidence falls outside the window
+become dormant during the monthly run, but dormancy is only a current-rating
+classification. For permanently enrolled players, stored history and pending
+work are retained, monthly refreshes continue, and later qualifying evidence
+reactivates them.
+
+The permanent cohort was initialized from players currently eligible when the
+policy was introduced on 1 August 2026. The 1,153 players already dormant at
+that point were deliberately excluded rather than retroactively assigned
+lifetime work. New qualifications after that baseline permanently enroll the
+player, even if their state later becomes dormant.
 
 ## Partner sampling
 
@@ -77,7 +87,8 @@ enables foreign keys, WAL journaling, a busy timeout, and normal synchronous
 mode on every connection.
 
 - `players`: normalized identity, display casing, candidate/eligible/dormant
-  state, evidence, and crawl completion timestamps.
+  state, evidence, permanent-tracking enrollment, and crawl completion
+  timestamps.
 - `games`: canonical board UUID, numeric and partner ids, move/source metadata,
   original JSON, and content hash.
 - `game_participants`: board color, normalized player, post-game Elo, result,
@@ -147,15 +158,20 @@ bughouse-explorer crawl status [--watch] [--json]
 `--max-players N` stops when the database contains `N` players with completed
 lifetime crawls; queued work remains durable for a later resume. Current-month
 archives are mutable snapshots, so bootstrap and resume requeue the current UTC
-month for active players. The monthly command queues both the selected/previous
-month and the current partial month. Game UUID upserts make repeated snapshots
+month for permanently tracked players. The monthly command queues both the
+selected/previous month and the current partial month for that same cohort,
+including dormant players. Game UUID upserts make repeated snapshots
 append-only and idempotent.
 
-`crawl reconcile` is an idempotent stopped-run operation. It converts legacy
-public 404 failures into terminal audit records and queues a fresh full archive
-list for any eligible player with neither a completed lifetime crawl nor a
-durable completion path. Re-fetched manifests reactivate missing month jobs
-even when an older job with the same key had completed.
+`crawl reconcile` is idempotent and also runs automatically at the start of a
+monthly run. It converts legacy public 404 failures into terminal audit records
+and queues a fresh full archive list for any permanently tracked player with
+neither a completed lifetime crawl nor a durable completion path. It also
+queues an archive-list-only provenance backfill for old completions that lack
+`full_archive_list_fetched_at`. A successful list response records the exact
+manifest, preserves already complete or terminal months, and queues only months
+that are actually missing. It therefore does not normally re-download the
+legacy players' complete histories.
 
 January 2016 is the hard lower archive boundary because Chess.com did not offer
 Bughouse earlier. Archive-list scheduling and explicit monthly refreshes both
@@ -168,8 +184,8 @@ links, request counters and rate, retries, heartbeat, recent job throughput,
 remaining queue size, and the latest persisted error.
 It also reports terminal outcomes and a closure audit. A run is labelled
 `complete` only when no queued, leased, deferred, or failed jobs remain and
-every eligible player is either fully crawled or has an explicit terminal
-archive outcome.
+every permanently tracked player is either fully crawled or has an explicit
+terminal archive outcome.
 
 Bootstrap, monthly, and resume commands stream timestamped job progress to the
 terminal. Each job produces a `START` line followed by `DONE`, `DEFERRED`,
@@ -186,7 +202,8 @@ qualification and dormancy evaluation.
 ## Operations
 
 The files under `deploy/` provide a manually started bootstrap service and a
-monthly systemd timer. Keep `data/crawler.db`, its WAL/SHM sidecars, and
+monthly systemd timer intended for the first of each month. Keep
+`data/crawler.db`, its WAL/SHM sidecars, and
 credentials writable/readable only by the crawler service account. SQLite is
 local-only by construction and must never be served directly to a browser.
 

@@ -137,6 +137,49 @@ def test_bounded_bootstrap_requeues_the_current_partial_month(tmp_path):
     assert store.month_cache("larso", now.year, now.month)["status"] == "queued"
 
 
+def test_monthly_run_reconciles_legacy_manifest_provenance(tmp_path):
+    path = str(tmp_path / "crawler.db")
+    apply_migrations(path)
+    store = CrawlerStore(path)
+    now = datetime.now(timezone.utc)
+    store.save_public_month(
+        "larso",
+        now.year,
+        now.month,
+        [{
+            "uuid": "00000000-0000-0000-0000-000000000054",
+            "url": "https://www.chess.com/game/live/123456789054",
+            "rules": "bughouse",
+            "end_time": int(now.timestamp()),
+            "white": {"username": "larso", "rating": 2000, "result": "win"},
+            "black": {"username": "other", "rating": 1500, "result": "loss"},
+        }],
+        run_started_at=now,
+    )
+    archive = store.lease_job("setup-worker")
+    store.complete_job(archive.id, {"months": 1})
+    assert store.mark_full_crawl_completed_if_done("larso") is True
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "crawl",
+            "--crawler-db",
+            path,
+            "monthly",
+            "--year",
+            str(now.year),
+            "--month",
+            str(now.month),
+            "--max-jobs",
+            "0",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "queued 1 legacy manifest backfill(s)" in result.output
+
+
 def test_resume_prints_live_job_progress(tmp_path, monkeypatch):
     path = str(tmp_path / "crawler.db")
     apply_migrations(path)

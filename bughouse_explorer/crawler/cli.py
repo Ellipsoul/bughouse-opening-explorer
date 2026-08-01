@@ -138,7 +138,8 @@ def _print_status(status, as_json=False):
     click.echo(
         "Players: "
         f"{players['eligible']} eligible, {players['candidate']} candidate, "
-        f"{players['dormant']} dormant"
+        f"{players['dormant']} dormant; "
+        f"{status['permanently_tracked_players']} permanently tracked"
     )
     click.echo(
         "Jobs: "
@@ -190,7 +191,7 @@ def _print_status(status, as_json=False):
     click.echo(
         "Closure audit: "
         f"{'ready' if closure['ready'] else 'incomplete'}; "
-        f"{closure['eligible_without_outcome']} eligible players without outcome, "
+        f"{closure['tracked_without_outcome']} tracked players without outcome, "
         f"{closure['failed_jobs']} failed jobs"
     )
 
@@ -372,7 +373,7 @@ def bootstrap_command(ctx, max_jobs, max_players, seed_initial):
 @click.option("--max-jobs", type=int, default=None)
 @click.pass_context
 def monthly_command(ctx, year, month, max_jobs):
-    """Refresh the previous month for every currently eligible player."""
+    """Refresh every permanently tracked player and discover new qualifiers."""
     if (year is None) != (month is None):
         raise click.UsageError("--year and --month must be supplied together")
     started = datetime.now(timezone.utc)
@@ -384,11 +385,17 @@ def monthly_command(ctx, year, month, max_jobs):
     store = _store(path)
     run_id = store.start_run("monthly", {"year": year, "month": month})
     dormant = store.reevaluate_dormancy(started)
+    reconciled = store.reconcile_crawl_state(run_id=run_id)
     queued = store.queue_monthly_refresh(year, month, run_id=run_id)
     current = store.queue_current_month_refresh(started, run_id=run_id)
     click.echo(
         f"Queued {len(queued)} player(s) for {year:04d}-{month:02d} and "
         f"{len(current)} for the current partial month; marked {dormant} dormant"
+    )
+    click.echo(
+        f"Reconciled {reconciled['requeued_archive_lists']} incomplete lifetime "
+        f"crawl(s) and queued "
+        f"{reconciled['requeued_manifest_backfills']} legacy manifest backfill(s)"
     )
     _run(store, config, run_id, started, max_jobs)
 

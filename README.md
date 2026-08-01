@@ -26,8 +26,9 @@ with a single, resumable crawl that can:
 - discover additional players through board participants and sampled partner
   games;
 - qualify players using timestamped post-game ratings;
-- ingest every available archive month for eligible players;
-- refresh active players with new games each month; and
+- ingest every available archive month when a player first qualifies;
+- refresh every once-qualified player with new games each month, permanently;
+  and
 - expose persisted progress without running a separate dashboard.
 
 The result is an authoritative raw-game database that can later feed an online
@@ -52,8 +53,15 @@ approved seeds
 
 A player qualifies when a Bughouse board ending inside the run's
 one-calendar-year window records a post-game rating of at least 2000. Seeds are
-not exempt. A candidate can qualify on a later encounter, and a dormant player
-can reactivate when new qualifying evidence appears.
+not exempt. Qualification permanently enrolls that player in game collection.
+The eligible/dormant state continues to describe only whether qualifying
+evidence is current; an enrolled player still receives monthly refreshes after
+becoming dormant and can reactivate when new qualifying evidence appears.
+
+Permanent tracking begins with the eligible cohort at the policy's introduction
+on 1 August 2026. Players already dormant at that point are not retroactively
+enrolled. A player who qualifies on or after that baseline remains enrolled if
+they later become dormant.
 
 Partner enrichment uses at most one deterministic probe per eligible player and
 calendar year, restricted to boards inside the rolling eligibility window. An
@@ -119,15 +127,52 @@ bughouse-explorer crawl rebuild-probes RUN_ID
 bughouse-explorer crawl reconcile RUN_ID
 ```
 
-Refresh both the previous calendar month and the still-changing current month
-for active eligible players:
+## Monthly maintenance
+
+Run the following command from the repository root on the first day of each
+new month:
 
 ```bash
-bughouse-explorer crawl monthly
-
-# Explicit replay for an operator-selected month.
-bughouse-explorer crawl monthly --year 2026 --month 7
+.venv/bin/bughouse-explorer crawl --crawler-db data/crawler.db monthly
 ```
+
+For example, a run started on 1 September refreshes August, the newly completed
+UTC month, and September, the still-changing current month. It does this for
+every permanently tracked player whose archive is available. The command also
+reconciles any interrupted lifetime work before processing the monthly queue.
+
+New opponents found in those archives are evaluated from their timestamped
+post-game ratings. If an observed player qualifies at 2000 or higher inside the
+run's one-calendar-year window, the crawler permanently enrolls that player,
+fetches their archive list, and queues every available Bughouse month back to
+January 2016. Future monthly runs then keep that player updated even if they
+later become dormant. The 1,153 players who were already dormant when permanent
+tracking was introduced on 1 August 2026 remain outside this cohort.
+
+The operation is idempotent: archive validators and UUID upserts make it safe to
+repeat without duplicating games. Monitor it from another terminal with:
+
+```bash
+.venv/bin/bughouse-explorer crawl --crawler-db data/crawler.db status --watch
+```
+
+`Ctrl-C` records a graceful stop and leaves queued work durable. Use the run id
+shown by `crawl status` to preserve the original evaluation cutoff when
+continuing:
+
+```bash
+.venv/bin/bughouse-explorer crawl --crawler-db data/crawler.db resume RUN_ID
+```
+
+To deliberately replay a different historical month, supply it explicitly:
+
+```bash
+.venv/bin/bughouse-explorer crawl --crawler-db data/crawler.db monthly \
+  --year 2026 --month 7
+```
+
+The production systemd timer in `deploy/bughouse-crawler-monthly.timer` runs the
+same default command at 03:00 UTC on the first day of each month.
 
 ## Configuration
 
@@ -145,17 +190,18 @@ failures, and stores retries in the durable queue instead of losing work when
 the process exits. Archive scheduling has a hard lower bound of January 2016,
 when Bughouse became available on Chess.com.
 
-Current-month archive responses are partial snapshots. Every bootstrap, resume,
-and monthly refresh requeues that UTC month for active players; UUID upserts
-append newly published games without duplicating boards already stored.
+Current-month archive responses are partial snapshots. Bootstrap, resume, and
+monthly runs requeue that UTC month for all permanently tracked players. UUID
+upserts append newly published games without duplicating boards already stored.
 
 ## SQLite data model
 
 The crawler owns `data/crawler.db`, opened in WAL mode. Its numbered migrations
 live under `bughouse_explorer/crawler/sql/`.
 
-- `players` stores normalized identities, eligibility state, discovery
-  provenance, and qualifying evidence.
+- `players` stores normalized identities, current eligibility state, discovery
+  and qualifying evidence, and the durable `tracking_started_at` enrollment
+  marker.
 - `games` stores canonical board UUIDs, numeric and partner references, moves,
   metadata, original JSON, and content hashes.
 - `game_participants` stores board colors, players, results, ratings, and rating
@@ -170,8 +216,8 @@ live under `bughouse_explorer/crawler/sql/`.
   leases, heartbeats, retries, and progress history.
 
 Status includes explicit terminal-unavailable outcomes and a closure audit. A
-drained queue is not reported complete while failed work or an eligible player
-without a completed/terminal outcome remains.
+drained queue is not reported complete while failed work or a permanently
+tracked player without a completed/terminal outcome remains.
 
 Public monthly archives are authoritative. Callback-derived partner boards are
 stored immediately and upgraded if the same board later appears in a public
