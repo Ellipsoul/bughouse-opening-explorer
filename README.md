@@ -55,11 +55,12 @@ one-calendar-year window records a post-game rating of at least 2000. Seeds are
 not exempt. A candidate can qualify on a later encounter, and a dormant player
 can reactivate when new qualifying evidence appears.
 
-Partner enrichment uses deterministic adaptive sampling per player-month:
-
-- 1-4 Bughouse boards: probe all;
-- 5-20 boards: probe one from each chronological half; and
-- more than 20 boards: probe one.
+Partner enrichment uses at most one deterministic probe per eligible player and
+calendar year, restricted to boards inside the rolling eligibility window. An
+initial full crawl therefore creates no more than two samples when the one-year
+window crosses New Year. Samples are created only after the player's lifetime
+archive is complete, and a partial current-year choice remains fixed as later
+monthly games arrive.
 
 The crawler follows the transitive eligible population reachable from the seeds.
 Chess.com does not expose a global Bughouse feed, so it cannot guarantee
@@ -110,6 +111,12 @@ bughouse-explorer crawl resume
 
 # Preserve the original eligibility cutoff when continuing a particular run.
 bughouse-explorer crawl resume RUN_ID
+
+# After changing sampling policy, rebuild only unfinished probe work.
+bughouse-explorer crawl rebuild-probes RUN_ID
+
+# Reconcile historical terminal 404s and stranded completion work while stopped.
+bughouse-explorer crawl reconcile RUN_ID
 ```
 
 Refresh both the previous calendar month and the still-changing current month
@@ -129,7 +136,8 @@ bughouse-explorer crawl monthly --year 2026 --month 7
 | `BUGHOUSE_CRAWLER_DB`      | `data/crawler.db`     | Raw games, crawl state, and progress          |
 | `CHESSCOM_USER_AGENT`      | Repository URL + operator email | Contact-bearing HTTP identity       |
 | `CHESSCOM_MIN_INTERVAL_MS` | `100`                 | Minimum interval between Chess.com requests   |
-| `BUGHOUSE_SAMPLER_VERSION` | `1`                   | Deterministic partner-sampling policy version |
+| `BUGHOUSE_SAMPLER_VERSION` | `2`                   | Deterministic annual partner-sampling policy version |
+| `BUGHOUSE_MAX_CONSECUTIVE_ERRORS` | `5`            | Stop after this many consecutive job errors          |
 
 The crawler uses one synchronous worker and one HTTP request at a time. It sends
 ETag and Last-Modified validators, honours Retry-After, backs off on transient
@@ -154,16 +162,23 @@ live under `bughouse_explorer/crawler/sql/`.
   provenance.
 - `player_months` is the monthly archive ledger with validators, counts,
   attempts, and errors.
+- `player_archive_month_manifest` records the authoritative month set that must
+  be successful or terminal unavailable before lifetime completion.
+- `partner_year_samples` records the frozen, versioned annual callback choice
+  for each eligible fully crawled player.
 - `crawl_runs`, `crawl_jobs`, and `crawl_events` provide durable execution,
   leases, heartbeats, retries, and progress history.
+
+Status includes explicit terminal-unavailable outcomes and a closure audit. A
+drained queue is not reported complete while failed work or an eligible player
+without a completed/terminal outcome remains.
 
 Public monthly archives are authoritative. Callback-derived partner boards are
 stored immediately and upgraded if the same board later appears in a public
 archive. Callback failures do not roll back successful public-archive ingestion.
 
-See [docs/CRAWLER.md](docs/CRAWLER.md) for detailed policies, transaction
-boundaries, retry behaviour, schema responsibilities, systemd operation, and the
-future integration phases.
+See the [documentation map](docs/README.md) for the current handoff, detailed
+crawler policy, measured run analysis, and the full data/index/API roadmap.
 
 ## Repository layout
 
