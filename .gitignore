@@ -4,6 +4,7 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 *.pyc
+.DS_Store
 
 # Node / frontend build
 node_modules/
