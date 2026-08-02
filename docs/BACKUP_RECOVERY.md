@@ -18,13 +18,14 @@ A usable recovery point must satisfy all of these conditions:
    `PRAGMA foreign_key_check`.
 5. Core row counts and qualification/closure invariants match the source
    snapshot.
-6. At least one verified copy exists outside the machine that holds the live
-   database.
+6. A verified copy exists outside the live database project path. Under the
+   current accepted threat model it may be on the same host; host and volume
+   failure are explicitly out of scope until the operator broadens the policy.
 7. The restore command, verification evidence, artifact size, checksum,
    creation time, and storage location are documented.
 
-Until every condition holds, the artifact is a useful copy but not a complete
-recovery system.
+Until every condition holds for the accepted threat model, the artifact is a
+useful copy but not a complete recovery system.
 
 ## Current recovery state
 
@@ -34,7 +35,57 @@ The live database is:
 data/crawler.db
 ```
 
-The existing checked compressed artifact is:
+The checked post-qualification-reconciliation compressed artifact created on
+2 August 2026 is:
+
+```text
+/Users/aronteh/Desktop/Coding_Adventures/bughouse/crawler-post-qualification-20260802.db.zst
+```
+
+It is 3,160,490,691 bytes and has SHA-256:
+
+```text
+90bc1778829eaf52bab881e0b02947e1635320a691f889330716635d94094872
+```
+
+Its checksum and restore-instruction sidecar is
+`/Users/aronteh/Desktop/Coding_Adventures/bughouse/crawler-post-qualification-20260802.manifest.txt`.
+
+Its 15,146,962,944-byte online-backup source and separately decompressed restore
+are byte-identical and have SHA-256:
+
+```text
+04b5694a288f1b0a966524090e991d70aa695096531933710a0a17f25bb5a5ac
+```
+
+The first temporary restore drill at
+`data/recovery/restore-drill-20260802/restored-crawler-post-qualification-20260802.db`
+passed `PRAGMA quick_check`, the complete foreign-key scan, schema/count
+comparison, qualification and fixed-window checks, active-work checks, and the
+closure audit. That temporary file was later removed. Exact evidence and
+commands are in the handoff. Reusable validation SQL is in
+`scripts/validate_crawler_recovery.sql`.
+
+The user-designated staging directory for this and future compressed backups is:
+
+```text
+/Users/aronteh/Desktop/Coding_Adventures/bughouse
+```
+
+The artifact and manifest were copied there and verified. The copied artifact
+has the expected 3,160,490,691-byte size and compressed SHA-256, and it passed
+`zstd --test`. A restore made specifically from that copied file was written to
+`data/recovery/readback-drill-bughouse-dir-20260802/`, matched the checked
+snapshot byte for byte, and passed the complete validation suite. That
+temporary restore was later removed.
+
+It and the repository are both on `/dev/disk3s5` on the same Mac. The operator
+explicitly accepts that boundary for now: recovery protects against accidental
+deletion or unintended irreversible live-database mutation, while host and
+volume failure are out of scope. The designated copy and demonstrated read-back
+therefore satisfy the current recovery contract and unblock product work.
+
+The superseded pre-reconciliation artifact was:
 
 ```text
 data/crawler-final-20260801.db.zst
@@ -46,11 +97,15 @@ Its recorded SHA-256 is:
 e0fcad6e6a8b91f3cf8fb288e0abb6215b38b0adb57c9d2670f6d16245cd2d12
 ```
 
-That artifact passed decompression-stream, SQLite integrity, foreign-key, and
-core-count checks when it was created. It predates the later 86-row
-qualification reconciliation, however, and no off-host restore has yet been
-verified. Preserve it until a newer post-reconciliation artifact has completed
-this entire runbook.
+That older artifact passed decompression-stream, SQLite integrity, foreign-key,
+and core-count checks when it was created, but it predated the later 86-row
+qualification reconciliation. The user authorized its deletion after the newer
+designated backup and restore drill were verified.
+
+All temporary uncompressed snapshots, restored drill databases, repository-local
+compressed copies, and the duplicate local manifest were also deleted. Six
+exact files totalling 51,761,869,319 bytes were removed; `data/` now contains
+only the live `crawler.db`.
 
 ## Compression boundary
 
@@ -77,7 +132,7 @@ Before writing a backup:
 - inspect free space on both the backup and restore volumes;
 - record the source database size and current Git revision;
 - choose explicit absolute paths for the uncompressed snapshot, compressed
-  artifact, restore target, and off-host destination; and
+  artifact, restore target, and designated backup destination; and
 - do not delete or overwrite any existing recovery point.
 
 Read-only crawler state:
@@ -126,7 +181,18 @@ The required results are `ok` and `0`. Also compare at least:
 - fixed-window violations; and
 - closure readiness.
 
-Any discrepancy must be explained before compression or off-host copying.
+Any discrepancy must be explained before compression or backup copying.
+
+The repository-local `scripts/validate_crawler_recovery.sql` records these
+checks for the current fixed bootstrap evaluation window. For a cold snapshot:
+
+```bash
+sqlite3 \
+  'file:/absolute/backup/path/crawler-post-qualification-YYYYMMDD.db?mode=ro&immutable=1' \
+  ".read scripts/validate_crawler_recovery.sql"
+```
+
+Review its fixed-window constants before using it for a future policy window.
 
 ### 4. Compress and checksum
 
@@ -163,26 +229,26 @@ checks, and closure audit against the restored path.
 The restore test is not complete if only `zstd --test` succeeds. SQLite must
 open and validate the decompressed database.
 
-### 6. Copy off-host and restore from that copy
+### 6. Copy to the designated backup directory and restore from that copy
 
-The operator must choose and authorize the off-host destination. Copy the
+The operator must choose and authorize the backup destination. Copy the
 compressed artifact and a small manifest containing its checksum and restore
 instructions. Verify the checksum at the destination.
 
-The strongest drill downloads or reads back the off-host object, restores it
-to a disposable local path, and repeats the database validation. Merely
-receiving a successful upload response does not prove recoverability.
+The drill reads back the designated copy, restores it to a disposable local
+path, and repeats the database validation. Merely completing the copy does not
+prove recoverability.
 
 ### 7. Publish the recovery record
 
 Update the handoff with:
 
 - snapshot timestamp and the point in crawler history it represents;
-- source, compressed, restored, and off-host sizes/locations;
+- source, compressed, restored, and backup sizes/locations;
 - SHA-256 checksum;
 - exact restore command;
 - `quick_check`, foreign-key, count, invariant, and closure results;
-- whether the restore was performed from the local or off-host copy;
+- whether the restore was performed from the designated backup copy;
 - any retained older recovery points; and
 - the next scheduled drill or rotation decision.
 
@@ -191,12 +257,15 @@ the exact paths and obtaining any required cleanup authority.
 
 ## Recovery priorities
 
-1. Create and verify a fresh post-qualification snapshot.
-2. Place the compressed artifact off-host and verify its checksum there.
-3. Restore from the off-host copy and rerun database validation.
-4. Retain enough recovery history to survive a bad monthly update being noticed
+1. Continue placing verified compressed snapshots and manifests in the
+   designated `/Users/aronteh/Desktop/Coding_Adventures/bughouse` directory.
+2. Periodically restore from that designated copy and rerun database validation.
+3. Retain enough recovery history to survive a bad monthly update being noticed
    after the newest backup.
-5. Only then consider backup rotation or storage-reduction experiments.
+4. Revisit physically independent/off-host storage only if the accepted threat
+   model changes.
+5. Consider rotation or storage-reduction experiments only after a newer
+   checked snapshot exists.
 
 The SQLite online-backup behavior is documented at
 <https://www.sqlite.org/backup.html>. Per-table and per-index storage evidence

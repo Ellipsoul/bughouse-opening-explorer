@@ -6,10 +6,10 @@ cloned data before changing the irreplaceable raw store or choosing hosting
 architecture. Final closure and data-quality measurements are recorded in
 [`CRAWL_RUN_FULL_ANALYSIS.md`](CRAWL_RUN_FULL_ANALYSIS.md).
 
-The immediate operational gate is a fresh post-reconciliation off-host restore
-drill. After that, the next product outcome is the derived opening explorer,
-not live raw-database compression. The durable layer boundaries and
-client-bandwidth design are defined in
+The post-reconciliation backup and designated-directory read-back restore are
+complete under the accepted accidental-deletion threat model. The immediate
+product outcome is now the derived opening explorer, not live raw-database
+compression. The durable layer boundaries and client-bandwidth design are defined in
 [`PLATFORM_ARCHITECTURE.md`](PLATFORM_ARCHITECTURE.md).
 
 ## Completed closure milestone
@@ -27,8 +27,8 @@ verified transitive closure run in which:
   later maintenance;
 - sampler-v2 annual probes have reached completion or a recorded unresolved
   terminal state;
-- a consistent local database backup passes integrity checks, while off-host
-  recovery is tracked as a separate operational gate;
+- a consistent database backup passes integrity checks and a restore from the
+  user-designated backup directory repeats the full validation suite;
 - final population, request, failure, throughput, and storage measurements are
   written down.
 
@@ -39,10 +39,10 @@ and the final 8,195,984-board database passed integrity and structural audits.
 This is closure of the population reachable from the seed set, not proof that
 every Chess.com Bughouse player globally was found.
 
-The crawl/data milestone is complete, but recovery hygiene is not: the checked
-local snapshot predates the 86-row qualification reconciliation and no off-host
-restore has been demonstrated. Complete `BACKUP_RECOVERY.md` before the next
-product build.
+The crawl/data and accepted recovery milestones are complete. The fresh backup
+postdates the 86-row qualification reconciliation, and a read-back restoration
+from the designated backup directory has been demonstrated. Host and volume
+failure are explicitly outside the current threat model.
 
 The next major product outcome is now a verified derived opening-index slice:
 an adapter from crawler records, explicit quality/provenance policy, measured
@@ -207,7 +207,7 @@ concerns. Chess.com transport encoding does not reduce stored SQLite pages.
 
 ## Workstream C — derived opening tree
 
-This is the next product workstream after the recovery gate. Follow
+This is the next product workstream. Follow
 `PLATFORM_ARCHITECTURE.md` so the raw store, derived snapshot, public API, and
 client remain independently recoverable and testable.
 

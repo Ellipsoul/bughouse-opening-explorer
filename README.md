@@ -7,9 +7,9 @@ This project is a modified continuation of the original
 [Bughouse Opening Explorer by Oh-My-Lands](https://github.com/Oh-My-Lands/bughouse-opening-explorer).
 The original project supplied the opening-index, replay, read-server, and
 frontend foundation that remains in this repository for reference. The current
-raw crawl and qualification-correctness milestone is complete. The immediate
-operational focus is verified off-host recovery; the next product focus is a
-versioned derived opening index and bandwidth-conscious online explorer.
+raw crawl, qualification-correctness, and accepted recovery milestone is
+complete. The immediate product focus is a versioned derived opening index and
+bandwidth-conscious online explorer.
 
 The project is licensed under the
 [GNU Affero General Public License v3](https://www.gnu.org/licenses/agpl-3.0.html).
@@ -61,7 +61,7 @@ navigation.
 See [`docs/PLATFORM_ARCHITECTURE.md`](docs/PLATFORM_ARCHITECTURE.md) for the
 layer contracts, publication lifecycle, bandwidth rules, and failure
 isolation. See [`docs/BACKUP_RECOVERY.md`](docs/BACKUP_RECOVERY.md) for the
-recovery gate that precedes the product build.
+demonstrated backup and restore procedure that protects the raw source of truth.
 
 ## How the crawl expands
 

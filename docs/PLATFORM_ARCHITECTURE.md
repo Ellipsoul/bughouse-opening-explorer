@@ -250,11 +250,14 @@ operation; it does not write back into the crawler database.
 
 ## Immediate sequence
 
-1. Complete the post-reconciliation backup and off-host restore drill.
-2. Define the first opening-index inclusion/provenance policy.
-3. Implement the crawler-to-index adapter against a checked clone.
-4. Build and benchmark a representative derived snapshot at candidate depths.
-5. Freeze the first versioned API contract from measured query shapes.
+1. Inspect and run the retained reference frontend, indexer, and read server
+   locally so the existing product behavior is understood before porting it.
+2. Define the first opening-index inclusion/provenance and terminal-node policy.
+3. Implement the crawler-to-index adapter against a checked snapshot.
+4. Build and benchmark a representative derived snapshot, including adaptive
+   termination once a position belongs to only one game.
+5. Freeze the first versioned API contract from measured query shapes, including
+   efficient player-plus-colour filtering.
 6. Verify a read-only FastAPI instance against that snapshot.
 7. Integrate branch-on-demand exploration into `bughouse-chess` and measure
    browser latency and transferred bytes.

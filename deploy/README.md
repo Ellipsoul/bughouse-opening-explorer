@@ -51,9 +51,10 @@ systemctl list-timers bughouse-crawler-monthly.timer
 Both services take the same `flock`, ensuring that only one crawler worker can run. The timer runs
 at 03:00 UTC on the first day of each month and is persistent across downtime.
 
-Back up `crawler.db` with SQLite's online `.backup` command, then copy the completed backup off-host.
-Do not copy only the main file while it has an active WAL. The crawler database is irreplaceable;
-the legacy opening index and future derived tree are rebuildable.
+Back up `crawler.db` with SQLite's online `.backup` command, then copy the completed compressed
+artifact and manifest to the operator-designated backup directory. Do not copy only the main file
+while it has an active WAL. The crawler database is irreplaceable; the legacy opening index and
+future derived tree are rebuildable.
 
 ## Routine deploy
 

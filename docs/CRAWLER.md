@@ -230,13 +230,14 @@ sqlite3 /opt/bughouse/data/crawler.db \
   ".backup '/opt/bughouse/backups/crawler-$(date -u +%F).db'"
 ```
 
-Copy the completed backup off-host nightly with the operator's backup system.
-Raw/crawl data is irreplaceable; the future positions, moves, facts, and
-aggregates should remain rebuildable.
+Copy the completed compressed backup and manifest to the operator-designated
+backup directory. Under the current threat model this may be on the same host;
+raw/crawl data is irreplaceable, while future positions, moves, facts, and
+aggregates remain rebuildable.
 
 Follow [`BACKUP_RECOVERY.md`](BACKUP_RECOVERY.md) for the complete recovery
 contract, including source/restore capacity checks, compressed-artifact
-checksums, independent SQLite validation, and an off-host restore drill.
+checksums, independent SQLite validation, and a designated-copy restore drill.
 Whole-file Zstandard is a cold backup transport only; it does not change the
 live raw database or its query/parser contract.
 

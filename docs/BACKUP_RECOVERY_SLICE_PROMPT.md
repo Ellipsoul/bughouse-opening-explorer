@@ -1,5 +1,10 @@
 # Copy-ready prompt — backup and recovery hygiene slice
 
+> Historical prompt: this slice completed on 2 August 2026. The verified
+> compressed artifact and manifest now live in the user-designated
+> `/Users/aronteh/Desktop/Coding_Adventures/bughouse` directory. The temporary
+> repository-local snapshot and restore-drill files were removed afterward.
+
 Use the following prompt to begin the next operational session.
 
 ---
