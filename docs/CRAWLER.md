@@ -234,6 +234,12 @@ Copy the completed backup off-host nightly with the operator's backup system.
 Raw/crawl data is irreplaceable; the future positions, moves, facts, and
 aggregates should remain rebuildable.
 
+Follow [`BACKUP_RECOVERY.md`](BACKUP_RECOVERY.md) for the complete recovery
+contract, including source/restore capacity checks, compressed-artifact
+checksums, independent SQLite validation, and an off-host restore drill.
+Whole-file Zstandard is a cold backup transport only; it does not change the
+live raw database or its query/parser contract.
+
 ## Deferred phases
 
 Phase 2 will port TCN replay and indexing to consume `games` and build an
@@ -242,3 +248,6 @@ implement the interface inside the existing `bughouse-chess` Next.js
 application, reusing its replay models and components. PostgreSQL can be
 reconsidered only if measured SQLite concurrency or database-size limits justify
 that operational cost; no such dependency is required for the crawler phase.
+The layer boundaries, publication lifecycle, API shape, and client-bandwidth
+rules are defined in
+[`PLATFORM_ARCHITECTURE.md`](PLATFORM_ARCHITECTURE.md).

@@ -6,6 +6,12 @@ cloned data before changing the irreplaceable raw store or choosing hosting
 architecture. Final closure and data-quality measurements are recorded in
 [`CRAWL_RUN_FULL_ANALYSIS.md`](CRAWL_RUN_FULL_ANALYSIS.md).
 
+The immediate operational gate is a fresh post-reconciliation off-host restore
+drill. After that, the next product outcome is the derived opening explorer,
+not live raw-database compression. The durable layer boundaries and
+client-bandwidth design are defined in
+[`PLATFORM_ARCHITECTURE.md`](PLATFORM_ARCHITECTURE.md).
+
 ## Completed closure milestone
 
 The crawler milestone was not merely “the process exited.” It required a
@@ -21,7 +27,8 @@ verified transitive closure run in which:
   later maintenance;
 - sampler-v2 annual probes have reached completion or a recorded unresolved
   terminal state;
-- a consistent database backup passes integrity checks and exists off-host;
+- a consistent local database backup passes integrity checks, while off-host
+  recovery is tracked as a separate operational gate;
 - final population, request, failure, throughput, and storage measurements are
   written down.
 
@@ -31,6 +38,11 @@ explicitly terminal unavailable, all 52,890 jobs reached terminal completion,
 and the final 8,195,984-board database passed integrity and structural audits.
 This is closure of the population reachable from the seed set, not proof that
 every Chess.com Bughouse player globally was found.
+
+The crawl/data milestone is complete, but recovery hygiene is not: the checked
+local snapshot predates the 86-row qualification reconciliation and no off-host
+restore has been demonstrated. Complete `BACKUP_RECOVERY.md` before the next
+product build.
 
 The next major product outcome is now a verified derived opening-index slice:
 an adapter from crawler records, explicit quality/provenance policy, measured
@@ -111,27 +123,42 @@ configurable consecutive-error circuit breaker stops sustained failure bursts.
 The systemd example restarts crashes, uses `flock`, and can resume a fixed run
 through `BUGHOUSE_RUN_ID`. Disk and off-host backup monitoring remain external.
 
-## Workstream B — lossless raw database reduction
+## Workstream B — lossless raw database reduction (deferred)
+
+This remains useful research, but it is not the next objective and is not a
+prerequisite for the opening explorer. `crawler.db` remains ordinary,
+losslessly queryable SQLite. Any future live-storage change must preserve raw
+payload round trips, parser behavior, normalized queries, and audit tooling on
+a disposable clone before migration is considered.
 
 ### Measured baseline
 
-At approximately `2026-08-01 09:30 UTC`:
+After qualification reconciliation on 2 August 2026:
 
-- `data/crawler.db`: 11,929,755,648 bytes (about 11.1 GiB);
-- 6,460,556 canonical boards;
-- `games` B-tree: about 8.315 GiB;
-- raw JSON logical bytes: about 4.92 GiB;
-- TCN logical bytes: about 0.49 GiB;
-- `game_participants` table: about 0.896 GiB;
-- participant primary-key autoindex: about 0.701 GiB;
-- player/game participant lookup index: about 0.660 GiB;
-- no freelist pages at the measurement point.
+- `data/crawler.db`: 15,146,962,944 bytes (about 14.1 GiB);
+- 8,195,984 canonical boards;
+- `games` B-tree: 11,323,654,144 bytes (74.76% of the database);
+- raw JSON logical bytes: 6,690,774,907;
+- TCN logical bytes: 650,941,464;
+- `game_participants` table: 1,224,667,136 bytes;
+- participant primary-key autoindex: 955,781,120 bytes;
+- player/game participant lookup index: 904,167,424 bytes;
+- repeated textual game UUIDs occupy at least 885,166,272 logical bytes across
+  `games` and `game_participants`, before index overhead;
+- hexadecimal content hashes occupy 524,542,976 logical bytes; and
+- no freelist pages were present at the measurement point.
+
+The existing whole-database Zstandard snapshot is 3,160,490,471 bytes, about
+79% smaller than the live SQLite file, but it is a cold recovery artifact that
+must be decompressed before querying and predates the latest reconciliation.
 
 A deterministic 10,000-row sample compressed each raw JSON payload separately
 with zlib level 6 from 7.80 MiB to 4.77 MiB, a ratio of 0.611. Median payload
 size fell from 823 to 512 bytes. Extrapolated only as a first estimate, this
-could save roughly 1.9 GiB of the current raw JSON while preserving it exactly.
+could save roughly 2.4 GiB of the current raw JSON while preserving it exactly.
 Benchmark zstd as well; do not standardize on zlib from this one sample.
+This sample is directional evidence only and does not authorize a live schema
+or payload-encoding change.
 
 ### Ranked experiments
 
@@ -179,6 +206,10 @@ Compression of the raw database and compression of HTTP responses are separate
 concerns. Chess.com transport encoding does not reduce stored SQLite pages.
 
 ## Workstream C — derived opening tree
+
+This is the next product workstream after the recovery gate. Follow
+`PLATFORM_ARCHITECTURE.md` so the raw store, derived snapshot, public API, and
+client remain independently recoverable and testable.
 
 ### What the retained reference implementation does
 
@@ -311,6 +342,11 @@ meet.
 Publish derived index versions atomically: build and validate a new snapshot,
 then switch the API to it and invalidate/version caches. Never expose a
 partially rebuilt opening tree.
+
+The API must return bounded branch data rather than a database or full tree.
+Measure response bytes, cancellation, top-child prefetch, and cache behavior as
+part of the product slice; do not treat database compression as a substitute
+for bandwidth-aware API design.
 
 The final interface belongs in the existing `bughouse-chess` Next.js
 application. Adapt the future API to its `ChessGame`, `MatchGame`, numeric game

@@ -7,8 +7,9 @@ This project is a modified continuation of the original
 [Bughouse Opening Explorer by Oh-My-Lands](https://github.com/Oh-My-Lands/bughouse-opening-explorer).
 The original project supplied the opening-index, replay, read-server, and
 frontend foundation that remains in this repository for reference. The current
-development focus is the crawler and raw-data platform needed to make an online
-opening explorer sustainable.
+raw crawl and qualification-correctness milestone is complete. The immediate
+operational focus is verified off-host recovery; the next product focus is a
+versioned derived opening index and bandwidth-conscious online explorer.
 
 The project is licensed under the
 [GNU Affero General Public License v3](https://www.gnu.org/licenses/agpl-3.0.html).
@@ -31,13 +32,36 @@ with a single, resumable crawl that can:
   and
 - expose persisted progress without running a separate dashboard.
 
-The result is an authoritative raw-game database that can later feed an online
+The result is an authoritative raw-game database that will feed an online
 opening tree and the
 [`bughouse-chess`](https://github.com/Ellipsoul/bughouse-chess) viewer.
 
 This phase does **not** provide a public game API or a deployed opening
 explorer. The legacy indexer, read server, and frontend are intentionally frozen
 until they are ported to consume the crawler database.
+
+## Platform direction
+
+```text
+crawler.db (lossless raw truth)
+        ↓
+versioned derived opening-index SQLite snapshot
+        ↓
+read-only FastAPI/read service
+        ↓
+bughouse-chess Next.js interface
+```
+
+The raw crawler database remains ordinary, lossless, queryable SQLite and is
+never sent to a browser. The opening tree is a separately rebuildable,
+read-optimized snapshot. The API serves bounded, versioned position and branch
+responses, and the client loads only the data required for the current
+navigation.
+
+See [`docs/PLATFORM_ARCHITECTURE.md`](docs/PLATFORM_ARCHITECTURE.md) for the
+layer contracts, publication lifecycle, bandwidth rules, and failure
+isolation. See [`docs/BACKUP_RECOVERY.md`](docs/BACKUP_RECOVERY.md) for the
+recovery gate that precedes the product build.
 
 ## How the crawl expands
 
