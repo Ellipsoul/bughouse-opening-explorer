@@ -285,6 +285,141 @@ def test_public_month_ingestion_filters_bughouse_and_promotes_qualifying_players
     }
 
 
+def test_qualifying_pointer_matches_the_player_participant_and_allowed_source(store):
+    observed_at = int(datetime(2026, 7, 20, tzinfo=timezone.utc).timestamp())
+    store.save_public_month(
+        "larso",
+        2026,
+        7,
+        [{
+            "uuid": "00000000-0000-0000-0000-000000000101",
+            "url": "https://www.chess.com/game/live/123456789101",
+            "rules": "bughouse",
+            "end_time": observed_at,
+            "white": {"username": "larso", "rating": 2000, "result": "win"},
+            "black": {"username": "other", "rating": 1500, "result": "loss"},
+        }],
+        run_started_at=datetime(2026, 7, 31, tzinfo=timezone.utc),
+    )
+
+    assert store.qualification_invariant_violations() == []
+
+    conn = store._connection()
+    try:
+        with conn:
+            conn.execute(
+                "UPDATE game_participants SET rating_source = 'callback_profile' "
+                "WHERE game_uuid = '00000000-0000-0000-0000-000000000101' "
+                "AND color = 'white'"
+            )
+    finally:
+        conn.close()
+    source_violation = store.qualification_invariant_violations()
+    assert len(source_violation) == 1
+    assert source_violation[0]["username"] == "larso"
+    assert source_violation[0]["rating_source"] == "callback_profile"
+
+    conn = store._connection()
+    try:
+        with conn:
+            conn.execute(
+                """
+                UPDATE game_participants
+                SET rating_source = 'public',
+                    player_id = (SELECT id FROM players WHERE username = 'other')
+                WHERE game_uuid = '00000000-0000-0000-0000-000000000101'
+                  AND color = 'white'
+                """
+            )
+    finally:
+        conn.close()
+    player_violation = store.qualification_invariant_violations()
+    assert len(player_violation) == 1
+    assert player_violation[0]["username"] == "larso"
+    assert player_violation[0]["participant_rating"] is None
+
+
+def test_public_participant_correction_recomputes_displaced_players_qualification(store):
+    started = datetime(2026, 7, 31, tzinfo=timezone.utc)
+    earlier = int(datetime(2026, 7, 10, tzinfo=timezone.utc).timestamp())
+    later = int(datetime(2026, 7, 20, tzinfo=timezone.utc).timestamp())
+
+    def game(uuid, numeric_id, end_time, white, rating):
+        return {
+            "uuid": uuid,
+            "url": f"https://www.chess.com/game/live/{numeric_id}",
+            "rules": "bughouse",
+            "end_time": end_time,
+            "white": {"username": white, "rating": rating, "result": "win"},
+            "black": {"username": "other", "rating": 1500, "result": "loss"},
+        }
+
+    earlier_uuid = "00000000-0000-0000-0000-000000000102"
+    corrected_uuid = "00000000-0000-0000-0000-000000000103"
+    store.save_public_month(
+        "larso",
+        2026,
+        7,
+        [
+            game(earlier_uuid, 123456789102, earlier, "larso", 2050),
+            game(corrected_uuid, 123456789103, later, "larso", 2100),
+        ],
+        run_started_at=started,
+    )
+
+    store.save_public_month(
+        "replacement",
+        2026,
+        7,
+        [game(corrected_uuid, 123456789103, later, "replacement", 1900)],
+        run_started_at=started,
+    )
+
+    assert store.qualification_invariant_violations() == []
+    assert store.status()["players"]["eligible"] == 1
+    assert store.get_game(corrected_uuid)["participants"]["white"] == {
+        "username": "replacement",
+        "rating": 1900,
+        "result": "win",
+    }
+
+
+def test_public_observations_qualify_only_inside_the_inclusive_fixed_window(store):
+    started = datetime(2026, 7, 31, 12, tzinfo=timezone.utc)
+    cutoff = int(datetime(2025, 7, 31, 12, tzinfo=timezone.utc).timestamp())
+    upper_bound = int(started.timestamp())
+
+    def game(suffix, username, end_time):
+        return {
+            "uuid": f"00000000-0000-0000-0000-{suffix:012d}",
+            "url": f"https://www.chess.com/game/live/{123456789100 + suffix}",
+            "rules": "bughouse",
+            "end_time": end_time,
+            "white": {"username": username, "rating": 2000, "result": "win"},
+            "black": {"username": "other", "rating": 1500, "result": "loss"},
+        }
+
+    store.save_public_month(
+        "at-lower-bound",
+        2026,
+        7,
+        [
+            game(104, "before-lower-bound", cutoff - 1),
+            game(105, "at-lower-bound", cutoff),
+            game(106, "at-upper-bound", upper_bound),
+            game(107, "after-upper-bound", upper_bound + 1),
+        ],
+        run_started_at=started,
+    )
+
+    assert store.status()["players"] == {
+        "candidate": 3,
+        "eligible": 2,
+        "dormant": 0,
+    }
+    assert store.qualification_invariant_violations() == []
+
+
 def test_same_public_board_reached_through_both_players_is_stored_once(store):
     game = {
         "uuid": "00000000-0000-0000-0000-000000000002",
@@ -348,6 +483,57 @@ def test_callback_boards_link_bidirectionally_and_discover_partner_players(store
     assert store.get_game(first_uuid)["partner_uuid"] == second_uuid
     assert store.get_game(second_uuid)["partner_uuid"] == first_uuid
     assert store.status()["players"]["eligible"] == 4
+
+
+def test_callback_pgn_observations_use_the_fixed_window_and_profiles_do_not_qualify(store):
+    started = datetime(2026, 7, 31, 12, tzinfo=timezone.utc)
+    cutoff = int(datetime(2025, 7, 31, 12, tzinfo=timezone.utc).timestamp())
+    upper_bound = int(started.timestamp())
+
+    def payload(suffix, username, end_time, *, pgn_rating=2000, profile_rating=None):
+        headers = {"White": username}
+        if pgn_rating is not None:
+            headers["WhiteElo"] = pgn_rating
+        players = {}
+        if profile_rating is not None:
+            players["white"] = {
+                "color": "white",
+                "username": username,
+                "rating": profile_rating,
+            }
+        return {
+            "game": {
+                "id": 123456789200 + suffix,
+                "uuid": f"00000000-0000-0000-0000-{suffix:012d}",
+                "type": "bughouse",
+                "endTime": end_time,
+                "pgnHeaders": headers,
+            },
+            "players": players,
+        }
+
+    observations = [
+        payload(201, "before-lower-bound", cutoff - 1),
+        payload(202, "at-lower-bound", cutoff),
+        payload(203, "at-upper-bound", upper_bound),
+        payload(204, "after-upper-bound", upper_bound + 1),
+        payload(
+            205,
+            "profile-only",
+            upper_bound,
+            pgn_rating=None,
+            profile_rating=2500,
+        ),
+    ]
+    for observation in observations:
+        store.save_callback_game(observation, run_started_at=started)
+
+    assert store.status()["players"] == {
+        "candidate": 3,
+        "eligible": 2,
+        "dormant": 0,
+    }
+    assert store.qualification_invariant_violations() == []
 
 
 def test_expired_job_lease_is_recovered_after_an_interruption(tmp_path):
@@ -559,6 +745,43 @@ def test_policy_reevaluation_ignores_callback_profile_ratings(store):
 
     assert dormant == 1
     assert store.status()["players"]["dormant"] == 1
+
+
+def test_policy_reevaluation_uses_the_same_inclusive_fixed_window(store):
+    evaluated_at = datetime(2026, 7, 31, 12, tzinfo=timezone.utc)
+    upper_bound = int(evaluated_at.timestamp())
+    admitted_at = datetime(2026, 8, 2, tzinfo=timezone.utc)
+
+    def game(suffix, username, end_time):
+        return {
+            "uuid": f"00000000-0000-0000-0000-{suffix:012d}",
+            "url": f"https://www.chess.com/game/live/{123456789300 + suffix}",
+            "rules": "bughouse",
+            "end_time": end_time,
+            "white": {"username": username, "rating": 2000, "result": "win"},
+            "black": {"username": "other", "rating": 1500, "result": "loss"},
+        }
+
+    store.save_public_month(
+        "at-upper-bound",
+        2026,
+        7,
+        [
+            game(301, "at-upper-bound", upper_bound),
+            game(302, "after-upper-bound", upper_bound + 1),
+        ],
+        run_started_at=admitted_at,
+    )
+
+    dormant = store.reevaluate_dormancy(evaluated_at)
+
+    assert dormant == 1
+    assert store.status()["players"] == {
+        "candidate": 1,
+        "eligible": 1,
+        "dormant": 1,
+    }
+    assert store.qualification_invariant_violations() == []
 
 
 def test_monthly_refresh_keeps_once_qualified_dormant_players(store):

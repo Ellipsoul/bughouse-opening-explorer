@@ -29,10 +29,15 @@ handling.
 ## Eligibility and discovery
 
 A timestamped post-game rating qualifies when it is at least 2000 and the board
-ended on or after the run's exact one-calendar-year cutoff. The boundary is
-inclusive. Seeds are candidates, not exceptions: their recent archives are
-scanned newest-first, and lifetime work is queued only after qualifying evidence
-appears.
+ended inside the run's fixed one-calendar-year evaluation window:
+
+```text
+eligibility_cutoff(run_started_at) <= end_time <= run_started_at
+```
+
+Both boundaries are inclusive. Seeds are candidates, not exceptions: their
+recent archives are scanned newest-first, and lifetime work is queued only
+after qualifying evidence appears.
 
 Every public board records both players. A callback rating can qualify a player
 only when it came from a timestamped `WhiteElo` or `BlackElo` PGN header; a
@@ -45,11 +50,22 @@ classification. For permanently enrolled players, stored history and pending
 work are retained, monthly refreshes continue, and later qualifying evidence
 reactivates them.
 
+Public payloads are authoritative corrections as well as new observations. If
+a public upsert replaces a participant identity or rating used by a player's
+active qualifying pointer, the crawler recomputes that player's evidence from
+their remaining authoritative `public` and `callback_pgn` observations inside
+the same fixed window. This prevents a denormalized pointer from outliving its
+participant row. Ordinary aging into dormancy does not end permanent tracking;
+enrollment is removed only when the original qualification is demonstrably
+invalid, not merely old.
+
 The permanent cohort was initialized from players currently eligible when the
 policy was introduced on 1 August 2026. The 1,153 players already dormant at
 that point were deliberately excluded rather than retroactively assigned
 lifetime work. New qualifications after that baseline permanently enroll the
-player, even if their state later becomes dormant.
+player, even if their state later becomes dormant. The qualification audit
+subsequently removed two invalid initial enrollments, leaving 1,013 tracked
+players before the first routine monthly run.
 
 ## Partner sampling
 

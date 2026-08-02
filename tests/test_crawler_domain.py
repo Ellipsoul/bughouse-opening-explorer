@@ -33,10 +33,13 @@ def test_annual_sampling_is_stable_across_order_and_changes_with_policy_version(
 def test_eligibility_is_inclusive_and_uses_a_one_calendar_year_window():
     started = datetime(2026, 7, 31, 12, tzinfo=timezone.utc)
     cutoff = int(datetime(2025, 7, 31, 12, tzinfo=timezone.utc).timestamp())
+    upper_bound = int(started.timestamp())
 
     assert is_qualifying_observation(2000, cutoff, started)
+    assert is_qualifying_observation(2000, upper_bound, started)
     assert not is_qualifying_observation(1999, cutoff, started)
     assert not is_qualifying_observation(2200, cutoff - 1, started)
+    assert not is_qualifying_observation(2200, upper_bound + 1, started)
     assert not is_qualifying_observation("unknown", cutoff, started)
     assert not is_qualifying_observation(2200, "unknown", started)
     assert normalize_username("  Emeraldddd ") == "emeraldddd"

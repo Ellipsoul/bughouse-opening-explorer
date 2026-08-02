@@ -6,13 +6,15 @@ Read these documents in this order when resuming work:
    database integrity, game-shape audit, move coverage, and bounded anomalies.
 2. [`HANDOFF_2026-08-01.md`](HANDOFF_2026-08-01.md) — current state, stable
    decisions, operational boundaries, and the next-session entrypoint.
-3. [`CRAWLER.md`](CRAWLER.md) — canonical crawler architecture and policy.
-4. [`PLATFORM_ROADMAP.md`](PLATFORM_ROADMAP.md) — lossless-storage,
+3. [`QUALIFICATION_CORRECTION_IMPACT_2026-08-01.md`](QUALIFICATION_CORRECTION_IMPACT_2026-08-01.md)
+   — per-player read-only impact evidence and the bounded reconciliation plan.
+4. [`CRAWLER.md`](CRAWLER.md) — canonical crawler architecture and policy.
+5. [`PLATFORM_ROADMAP.md`](PLATFORM_ROADMAP.md) — lossless-storage,
    opening-index, read-API, prefetch, hosting, and viewer-integration research
    plan.
-5. [`CRAWL_RUN_250_ANALYSIS.md`](CRAWL_RUN_250_ANALYSIS.md) — historical checkpoint
+6. [`CRAWL_RUN_250_ANALYSIS.md`](CRAWL_RUN_250_ANALYSIS.md) — historical checkpoint
    completion, reconciliation findings, and the pre-full-crawl baseline.
-6. [`CRAWL_RUN_100_ANALYSIS.md`](CRAWL_RUN_100_ANALYSIS.md) — historical
+7. [`CRAWL_RUN_100_ANALYSIS.md`](CRAWL_RUN_100_ANALYSIS.md) — historical
    measurements and the evidence that led to sampler version 2. Treat its
    point-in-time queue tables as historical rather than current status.
 

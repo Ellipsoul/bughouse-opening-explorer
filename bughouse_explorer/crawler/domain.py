@@ -31,6 +31,13 @@ def eligibility_cutoff(run_started_at):
     return int(cutoff.timestamp())
 
 
+def eligibility_window(run_started_at):
+    """Return the inclusive Unix-timestamp bounds for one fixed evaluation."""
+    if run_started_at.tzinfo is None:
+        run_started_at = run_started_at.replace(tzinfo=timezone.utc)
+    return eligibility_cutoff(run_started_at), int(run_started_at.timestamp())
+
+
 def is_qualifying_observation(
     rating, end_time, run_started_at, threshold=RATING_THRESHOLD
 ):
@@ -42,8 +49,10 @@ def is_qualifying_observation(
         numeric_end_time = int(end_time)
     except (TypeError, ValueError):
         return False
-    return numeric_rating >= threshold and numeric_end_time >= eligibility_cutoff(
-        run_started_at
+    lower_bound, upper_bound = eligibility_window(run_started_at)
+    return (
+        numeric_rating >= threshold
+        and lower_bound <= numeric_end_time <= upper_bound
     )
 
 

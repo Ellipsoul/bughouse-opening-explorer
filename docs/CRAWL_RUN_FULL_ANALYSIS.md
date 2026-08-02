@@ -8,6 +8,12 @@ index is built.
 The crawler database is intentionally excluded from Git. These figures are a
 dated evidence snapshot, not a replacement for querying the live database.
 
+The two qualification anomalies recorded below were corrected after this
+historical audit. See
+[`QUALIFICATION_CORRECTION_IMPACT_2026-08-01.md`](QUALIFICATION_CORRECTION_IMPACT_2026-08-01.md)
+and [`HANDOFF_2026-08-01.md`](HANDOFF_2026-08-01.md) for the read-only impact
+evidence, bounded reconciliation, and current cohort counts.
+
 ## Executive summary
 
 - The run is `complete`: all durable jobs are complete, with no queued, leased,

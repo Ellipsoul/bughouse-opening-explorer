@@ -14,6 +14,7 @@ from .domain import (
     BUGHOUSE_START_MONTH,
     RATING_THRESHOLD,
     eligibility_cutoff,
+    eligibility_window,
     is_qualifying_observation,
     normalize_username,
     select_partner_year_sample,
@@ -361,6 +362,44 @@ class CrawlerStore:
         conn = self._connection()
         try:
             return self._closure_audit_connection(conn)
+        finally:
+            conn.close()
+
+    def qualification_invariant_violations(self):
+        """Return qualification pointers unsupported by authoritative evidence."""
+        conn = self._connection()
+        try:
+            return [
+                dict(row)
+                for row in conn.execute(
+                    """
+                    SELECT p.username, p.state, p.qualifying_game_uuid,
+                           p.qualifying_rating, p.qualifying_at,
+                           gp.rating AS participant_rating,
+                           gp.rating_source, g.end_time AS game_end_time
+                    FROM players p
+                    LEFT JOIN games g ON g.uuid = p.qualifying_game_uuid
+                    LEFT JOIN game_participants gp
+                      ON gp.game_uuid = p.qualifying_game_uuid
+                     AND gp.player_id = p.id
+                    WHERE (
+                            p.state = 'eligible'
+                         OR p.qualifying_game_uuid IS NOT NULL
+                         OR p.qualifying_rating IS NOT NULL
+                         OR p.qualifying_at IS NOT NULL
+                    ) AND (
+                            p.qualifying_game_uuid IS NULL
+                         OR p.qualifying_rating IS NULL
+                         OR p.qualifying_at IS NULL
+                         OR gp.player_id IS NULL
+                         OR gp.rating IS NOT p.qualifying_rating
+                         OR gp.rating_source NOT IN ('public', 'callback_pgn')
+                         OR g.end_time IS NOT p.qualifying_at
+                    )
+                    ORDER BY p.username
+                    """
+                )
+            ]
         finally:
             conn.close()
 
@@ -963,6 +1002,14 @@ class CrawlerStore:
         player = self._ensure_player(conn, participant["username"], "public_game")
         rating = participant.get("rating")
         result = participant.get("result")
+        previous = conn.execute(
+            """
+            SELECT player_id, rating, rating_source
+            FROM game_participants
+            WHERE game_uuid = ? AND color = ?
+            """,
+            (game_uuid, color),
+        ).fetchone()
         conn.execute(
             """
             INSERT INTO game_participants
@@ -978,6 +1025,66 @@ class CrawlerStore:
             self._qualify_player(
                 conn, player, rating, game_uuid, end_time, run_id=run_id
             )
+        if previous and (
+            previous["player_id"] != player["id"]
+            or previous["rating"] != rating
+            or previous["rating_source"] != "public"
+        ):
+            self._recompute_player_qualification(
+                conn, previous["player_id"], game_uuid, run_started_at
+            )
+
+    def _recompute_player_qualification(
+        self, conn, player_id, changed_game_uuid, run_started_at
+    ):
+        current = conn.execute(
+            "SELECT qualifying_game_uuid FROM players WHERE id = ?",
+            (player_id,),
+        ).fetchone()
+        if not current or current["qualifying_game_uuid"] != changed_game_uuid:
+            return
+        lower_bound, upper_bound = eligibility_window(run_started_at)
+        observation = conn.execute(
+            """
+            SELECT gp.game_uuid, gp.rating, g.end_time
+            FROM game_participants gp
+            JOIN games g ON g.uuid = gp.game_uuid
+            WHERE gp.player_id = ?
+              AND gp.rating_source IN ('public', 'callback_pgn')
+              AND gp.rating >= ? AND g.end_time BETWEEN ? AND ?
+            ORDER BY g.end_time DESC, gp.rating DESC, gp.game_uuid
+            LIMIT 1
+            """,
+            (
+                player_id, RATING_THRESHOLD, lower_bound, upper_bound,
+            ),
+        ).fetchone()
+        now = self._now()
+        if observation:
+            conn.execute(
+                """
+                UPDATE players
+                SET state = 'eligible', qualifying_rating = ?,
+                    qualifying_game_uuid = ?, qualifying_at = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    observation["rating"], observation["game_uuid"],
+                    observation["end_time"], now, player_id,
+                ),
+            )
+            return
+        conn.execute(
+            """
+            UPDATE players
+            SET state = CASE WHEN tracking_started_at IS NULL
+                             THEN 'candidate' ELSE 'dormant' END,
+                qualifying_rating = NULL, qualifying_game_uuid = NULL,
+                qualifying_at = NULL, updated_at = ?
+            WHERE id = ?
+            """,
+            (now, player_id),
+        )
 
     def _qualify_player(
         self, conn, player, rating, game_uuid, end_time, *, run_id=None
@@ -1626,7 +1733,7 @@ class CrawlerStore:
 
     def reevaluate_dormancy(self, run_started_at):
         """Update current eligibility without ending permanent game tracking."""
-        cutoff = eligibility_cutoff(run_started_at)
+        cutoff, upper_bound = eligibility_window(run_started_at)
         conn = self._connection()
         try:
             with conn:
@@ -1645,7 +1752,7 @@ class CrawlerStore:
                             JOIN games g ON g.uuid = gp.game_uuid
                             WHERE gp.player_id = players.id
                               AND gp.rating_source IN ('public', 'callback_pgn')
-                              AND gp.rating >= ? AND g.end_time >= ?
+                              AND gp.rating >= ? AND g.end_time BETWEEN ? AND ?
                         ) THEN 'eligible' ELSE 'dormant' END,
                         qualifying_rating = (
                             SELECT gp.rating
@@ -1653,7 +1760,7 @@ class CrawlerStore:
                             JOIN games g ON g.uuid = gp.game_uuid
                             WHERE gp.player_id = players.id
                               AND gp.rating_source IN ('public', 'callback_pgn')
-                              AND gp.rating >= ? AND g.end_time >= ?
+                              AND gp.rating >= ? AND g.end_time BETWEEN ? AND ?
                             ORDER BY g.end_time DESC, gp.rating DESC, gp.game_uuid
                             LIMIT 1
                         ),
@@ -1663,7 +1770,7 @@ class CrawlerStore:
                             JOIN games g ON g.uuid = gp.game_uuid
                             WHERE gp.player_id = players.id
                               AND gp.rating_source IN ('public', 'callback_pgn')
-                              AND gp.rating >= ? AND g.end_time >= ?
+                              AND gp.rating >= ? AND g.end_time BETWEEN ? AND ?
                             ORDER BY g.end_time DESC, gp.rating DESC, gp.game_uuid
                             LIMIT 1
                         ),
@@ -1673,7 +1780,7 @@ class CrawlerStore:
                             JOIN games g ON g.uuid = gp.game_uuid
                             WHERE gp.player_id = players.id
                               AND gp.rating_source IN ('public', 'callback_pgn')
-                              AND gp.rating >= ? AND g.end_time >= ?
+                              AND gp.rating >= ? AND g.end_time BETWEEN ? AND ?
                             ORDER BY g.end_time DESC, gp.rating DESC, gp.game_uuid
                             LIMIT 1
                         ),
@@ -1683,12 +1790,16 @@ class CrawlerStore:
                     (
                         RATING_THRESHOLD,
                         cutoff,
+                        upper_bound,
                         RATING_THRESHOLD,
                         cutoff,
+                        upper_bound,
                         RATING_THRESHOLD,
                         cutoff,
+                        upper_bound,
                         RATING_THRESHOLD,
                         cutoff,
+                        upper_bound,
                         self._now(),
                     ),
                 )
