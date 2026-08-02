@@ -153,6 +153,22 @@ Measure:
 lookups require per-game membership. That expectation must be measured rather
 than used as a hosting forecast.
 
+### Adaptive terminal policy
+
+The 2 August 2026 exploratory evidence in
+`OPENING_TREE_EXPLORATION_2026-08-02.md` supports replacing a fixed-depth-only
+tree with exact support-aware termination. Count distinct accepted games per
+canonical position, de-duplicating repeated visits by one game. Emit a game's
+path through its first globally support-one position and store an explicit
+reference to that game; otherwise terminate at game end. A support-first pass
+followed by an emission pass is the current simplest exact design.
+
+Global support one is a safe physical stopping point for every subset. A
+player-plus-colour filter can reach support one earlier, so the read API must be
+able to return a filtered terminal and its sole game while the global index
+continues deeper. Any replay safety limit or decode failure is a separately
+counted build outcome, never an ordinary terminal.
+
 ## Layer 3 — read-only API
 
 FastAPI remains a suitable reference service because the existing server

@@ -10,18 +10,21 @@ Read these documents in this order when resuming work:
 3. [`BACKUP_RECOVERY_SLICE_PROMPT.md`](BACKUP_RECOVERY_SLICE_PROMPT.md) —
    historical copy-ready prompt for the completed recovery-hygiene session.
    The checked designated-directory backup and read-back restore are complete.
-4. [`PLATFORM_ARCHITECTURE.md`](PLATFORM_ARCHITECTURE.md) — durable raw-to-index,
+4. [`OPENING_TREE_EXPLORATION_2026-08-02.md`](OPENING_TREE_EXPLORATION_2026-08-02.md)
+   — demonstrated local reference UI, adaptive uniqueness evidence, terminal
+   semantics, schema gaps, and the copy-ready next-session prompt.
+5. [`PLATFORM_ARCHITECTURE.md`](PLATFORM_ARCHITECTURE.md) — durable raw-to-index,
    API, publication, client-bandwidth, and failure-isolation architecture.
-5. [`PLATFORM_ROADMAP.md`](PLATFORM_ROADMAP.md) — measured opening-index,
+6. [`PLATFORM_ROADMAP.md`](PLATFORM_ROADMAP.md) — measured opening-index,
    read-API, prefetch, hosting, and deferred storage research plan.
-6. [`CRAWLER.md`](CRAWLER.md) — canonical crawler architecture and policy.
-7. [`CRAWL_RUN_FULL_ANALYSIS.md`](CRAWL_RUN_FULL_ANALYSIS.md) — final closure,
+7. [`CRAWLER.md`](CRAWLER.md) — canonical crawler architecture and policy.
+8. [`CRAWL_RUN_FULL_ANALYSIS.md`](CRAWL_RUN_FULL_ANALYSIS.md) — final closure,
    database integrity, game-shape audit, move coverage, and bounded anomalies.
-8. [`QUALIFICATION_CORRECTION_IMPACT_2026-08-01.md`](QUALIFICATION_CORRECTION_IMPACT_2026-08-01.md)
+9. [`QUALIFICATION_CORRECTION_IMPACT_2026-08-01.md`](QUALIFICATION_CORRECTION_IMPACT_2026-08-01.md)
    — per-player read-only impact evidence and the bounded reconciliation plan.
-9. [`CRAWL_RUN_250_ANALYSIS.md`](CRAWL_RUN_250_ANALYSIS.md) — historical checkpoint
+10. [`CRAWL_RUN_250_ANALYSIS.md`](CRAWL_RUN_250_ANALYSIS.md) — historical checkpoint
    completion, reconciliation findings, and the pre-full-crawl baseline.
-10. [`CRAWL_RUN_100_ANALYSIS.md`](CRAWL_RUN_100_ANALYSIS.md) — historical
+11. [`CRAWL_RUN_100_ANALYSIS.md`](CRAWL_RUN_100_ANALYSIS.md) — historical
    measurements and the evidence that led to sampler version 2. Treat its
    point-in-time queue tables as historical rather than current status.
 
