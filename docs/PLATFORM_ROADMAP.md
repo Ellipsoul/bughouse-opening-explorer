@@ -233,28 +233,35 @@ The current comments describe a prior database with roughly 47 million
 `game_facts` and expensive root queries around 1.3 million facts. Those figures
 are reference evidence, not forecasts for the much larger crawler corpus.
 
-### Required port and measurements
+### Required architecture and measurements
 
-1. Add an adapter from crawler `games` and `game_participants` to the indexer's
-   expected board/player/result shape. Index public authoritative boards; define
-   whether callback-only boards are excluded until upgraded.
-2. Preserve board UUID, content hash, and an index version so changed source
-   payloads can invalidate and rebuild a game's facts safely.
-3. Build a representative subset first. Measure games/second, positions,
-   edges, facts per game, peak RAM, WAL growth, final bytes by B-tree, and query
-   latency by depth.
-4. Decide maximum indexed ply from product value and measured explosion. The
-   explorer does not necessarily need full games to answer opening questions.
-5. Keep raw/crawl tables irreplaceable and derived tables rebuildable. A
-   separate read-optimized SQLite database or immutable snapshot is likely
-   cleaner than serving the actively written crawler database.
-6. Measure incremental updates and correction handling before designing the
-   monthly production build.
+1. Use exact decoded move prefixes as trie-node identity. Transpositions remain
+   separate. Pocket differences do not split a shared prefix; drops remain
+   navigable edges and board placement is replayed for display.
+2. Add a format-neutral adapter from crawler `games` and `game_participants` to
+   the accepted board/player/result shape. Define whether callback-only boards
+   are excluded until upgraded.
+3. Preserve board UUID, content hash, and an index version so changed source
+   payloads can invalidate and rebuild derived membership safely.
+4. Measure prefix shape first: unique depth, nodes and branches by ply,
+   identical complete lines, games ending at internal nodes, and compression
+   from singleton termination and one-child runs.
+5. Compare a compact relational baseline with a prefix-interval packed trie.
+   Sorting games by move sequence makes every prefix a contiguous game-ordinal
+   range; benchmark per-player White/Black sorted postings and compressed
+   bitmaps for filtered rank/intersection queries.
+6. Build representative subsets with identical input and query fixtures.
+   Measure games/second, nodes, edges, membership, peak RAM, temporary/write-
+   amplification/final bytes, and cold/warm filtered and unfiltered latency.
+7. Keep raw/crawl tables irreplaceable and derived artifacts rebuildable. Serve
+   an immutable version, never the actively written crawler database.
+8. Measure correction handling, deterministic rebuild, atomic publication, and
+   rollback before designing the monthly production build.
 
-The dominant size risk is `game_facts`: it grows approximately with indexed
-plies per unique game. Position and move de-duplication does not similarly
-de-duplicate per-game facts because filters and example-game lookup need game
-membership.
+`game_facts` remains the dominant size-risk hypothesis for the relational
+baseline. The prefix-interval candidate may replace repeated per-node facts with
+node ordinal ranges and seat-specific postings. Neither shape is accepted until
+the representative comparison measures it.
 
 ## Workstream D — read API, latency, and bandwidth
 
@@ -282,28 +289,29 @@ request cancellation or stale-render guard.
 
 ### Scaling strategy to test
 
-1. **Keep navigation keyed by compact position ids.** Return child ids and FENs
-   with move rows as the reference API does.
+1. **Keep navigation keyed by compact trie-node ids.** Return child ids and
+   enough move/path data to replay the displayed board. FEN is a projection,
+   not node identity.
 2. **Materialize the overwhelmingly common paths.** Preserve `move_agg` for the
    default view. Consider a small number of product-defined rating buckets if
    arbitrary rating thresholds make live aggregation too costly; measure before
    multiplying aggregates.
 3. **Fetch panels concurrently.** Moves and representative games can start
    together, while moves retain render priority.
-4. **Prefetch narrowly.** After rendering a position, prefetch continuations for
+4. **Prefetch narrowly.** After rendering a node, prefetch continuations for
    only the top `K` likely child moves, initially `K=2` or `3` and depth one.
-   Cache by `(dataset_version, position_id, rating/filter tuple)`. Do not
+   Cache by `(dataset_version, node_id, rating/filter tuple)`. Do not
    recursively prefetch the tree: branching causes exponential request and
    bandwidth growth.
 5. **Use cancellation and stale-response protection.** An `AbortController` or
-   navigation generation id should prevent a slow prior position from
+   navigation generation id should prevent a slow prior node from
    overwriting a later one.
 6. **Consider a bounded branch endpoint.** One API call could return the current
-   position plus top-child summaries, but it must enforce maximum nodes, depth,
+   node plus top-child summaries, but it must enforce maximum nodes, depth,
    and encoded bytes. Compare it with ordinary HTTP/2 parallel keyed requests.
 7. **Exploit immutable dataset versions.** Serve a read-only snapshot with a
    version id and strong ETags. CDN/browser caching can then retain popular
-   position responses safely until a new index snapshot is published.
+   node responses safely until a new index snapshot is published.
 8. **Keep username autocomplete separate and lazy.** The reference frontend
    already loads it after first paint. At hundreds of thousands of candidates,
    the production API should expose only indexed/eligible explorer users or a

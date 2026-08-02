@@ -100,12 +100,15 @@ race the mutable live database. Initial index experiments should use a checked
 clone. A production monthly pipeline can later coordinate snapshot creation,
 incremental indexing, validation, and atomic publication.
 
-## Layer 2 — versioned opening-index snapshot
+## Layer 2 — versioned derived opening index
 
-The retained indexer is the reference starting point. It replays TCN into
-positions and move edges and stores game membership needed for filtering and
-examples. The port should introduce an explicit crawler adapter rather than
-making the indexer understand crawler-control tables directly.
+The retained indexer is a behavioral and benchmark reference, not a schema,
+framework, or file-format constraint. It replays TCN into positions and move
+edges and demonstrates game membership needed for filtering and examples. The
+production slice may use a redesigned SQLite schema, immutable packed arrays,
+compressed bitmap postings, an embedded key/value store, another build
+language, or a measured hybrid. Every candidate must consume the same explicit
+crawler-adapter contract rather than crawler-control tables directly.
 
 ### Adapter contract
 
@@ -138,36 +141,59 @@ from the opening tree must never delete or rewrite its crawler record.
 
 ### Representative build gate
 
-Build a representative subset before choosing the production depth or schema.
+Build comparable representative subsets before choosing the production storage
+engine, depth, or schema. Node identity is already fixed as the exact move
+prefix. Include a compact relational
+baseline and at least one materially different representation; compressed
+game-id bitmap postings deserve explicit measurement because
+player-plus-colour filtering is set intersection plus cardinality. The leading
+alternative is a prefix-interval packed trie: after sorting games by exact move
+sequence, every prefix maps to a contiguous game-ordinal range, and each
+player/seat can be indexed by a sorted ordinal posting list.
 Measure:
 
 - accepted/skipped games and reasons;
 - games and plies processed per second;
-- positions, move edges, facts, and aggregates;
-- facts per game and growth by indexed ply;
-- peak RAM, temporary bytes, WAL growth, and final B-tree sizes;
-- cold and warm root/deep-position query latency; and
+- trie nodes, move edges, membership/posting entries, and aggregates;
+- membership per game and growth by indexed ply;
+- peak RAM, temporary bytes, write amplification, and final component sizes
+  (including B-tree sizes for SQLite candidates);
+- cold and warm root/deep-node query latency; and
 - correction and incremental-update behavior.
 
-`game_facts` is expected to be the main size risk because filters and example
-lookups require per-game membership. That expectation must be measured rather
-than used as a hosting forecast.
+`game_facts` is expected to be the main size risk in the relational baseline
+because filters and example lookups require membership. The prefix-interval
+candidate may avoid that row-per-node-per-game shape. Both expectations must be
+measured rather than used as hosting forecasts.
+
+### Node identity
+
+The first product is a move-prefix trie. A node is the exact decoded move
+sequence from the start; transpositions remain separate paths. Board placement,
+side, castling, and en-passant state are replayed for display but do not identify
+or merge nodes. Pocket holdings remain meaningful context but do not split a
+shared prefix: games with the same move sequence share a node even if their
+pockets differ. Drop moves remain first-class navigable edges and update the
+displayed board. Holdings may later be exposed as bounded annotations without
+changing trie identity. Holdings-aware state graphs are deferred.
 
 ### Adaptive terminal policy
 
 The 2 August 2026 exploratory evidence in
 `OPENING_TREE_EXPLORATION_2026-08-02.md` supports replacing a fixed-depth-only
 tree with exact support-aware termination. Count distinct accepted games per
-canonical position, de-duplicating repeated visits by one game. Emit a game's
-path through its first globally support-one position and store an explicit
-reference to that game; otherwise terminate at game end. A support-first pass
-followed by an emission pass is the current simplest exact design.
+exact move prefix. Collapse a path at its first globally support-one prefix and
+store an explicit reference to that game; otherwise terminate at game end.
+Identical complete lines may retain multiple game references, and an ended game
+may coexist with outgoing continuations at the same node.
 
 Global support one is a safe physical stopping point for every subset. A
 player-plus-colour filter can reach support one earlier, so the read API must be
-able to return a filtered terminal and its sole game while the global index
-continues deeper. Any replay safety limit or decode failure is a separately
-counted build outcome, never an ordinary terminal.
+able to return a filtered terminal and its sole game while the global trie
+continues deeper. Sorted fixed-width TCN token strings, streaming prefix counts,
+and compressed radix/Patricia construction are all candidates for the exact
+build. Any replay safety limit or decode failure is a separately counted build
+outcome, never an ordinary terminal.
 
 ## Layer 3 — read-only API
 
@@ -178,13 +204,14 @@ names.
 
 ### Candidate endpoints
 
-- `GET /api/meta` — dataset version, root position, indexed depth, coverage,
+- `GET /api/meta` — dataset version, root node, indexed depth, coverage,
   policy version, and freshness watermark.
-- `GET /api/positions/{position_id}/moves` — bounded continuations with child
+- `GET /api/nodes/{node_id}/moves` — bounded continuations with child
   ids, move notation, aggregate results, and optional lightweight filter data.
-- `GET /api/positions/{position_id}/games` — a strictly limited set of
+- `GET /api/nodes/{node_id}/games` — a strictly limited set of
   representative games.
-- `GET /api/positions/lookup?fen=...` — canonical FEN lookup where needed.
+- optional FEN lookup must acknowledge that several move prefixes can display
+  the same placement; FEN is not node identity.
 - `GET /api/players?prefix=...` — server-side prefix search over indexed
   identities rather than a complete username download.
 
@@ -266,18 +293,24 @@ operation; it does not write back into the crawler database.
 
 ## Immediate sequence
 
-1. Inspect and run the retained reference frontend, indexer, and read server
-   locally so the existing product behavior is understood before porting it.
-2. Define the first opening-index inclusion/provenance and terminal-node policy.
-3. Implement the crawler-to-index adapter against a checked snapshot.
-4. Build and benchmark a representative derived snapshot, including adaptive
-   termination once a position belongs to only one game.
-5. Freeze the first versioned API contract from measured query shapes, including
+1. Use the completed retained-application exploration as behavioral evidence,
+   not a production schema constraint.
+2. Apply the settled move-prefix-trie semantics: exact move sequence is node
+   identity, transpositions do not merge, and drops remain navigable edges.
+3. Define inclusion/provenance, global and filtered terminal semantics, and a
+   format-neutral crawler-adapter contract.
+4. Prototype and fairly benchmark a compact relational baseline and at least
+   one prefix-interval packed-trie/bitmap or embedded-key/value alternative
+   against a checked snapshot, including adaptive support-one termination.
+5. Select and document the simplest architecture that clears explicit capacity,
+   rebuild, correctness, latency, and operational targets with headroom.
+6. Freeze the first versioned API contract from measured query shapes, including
    efficient player-plus-colour filtering.
-6. Verify a read-only FastAPI instance against that snapshot.
-7. Integrate branch-on-demand exploration into `bughouse-chess` and measure
+7. Verify the chosen read service against the immutable derived version;
+   FastAPI remains an option rather than a requirement.
+8. Integrate branch-on-demand exploration into `bughouse-chess` and measure
    browser latency and transferred bytes.
-8. Add a repeatable monthly snapshot/build/validate/publish workflow.
+9. Add a repeatable monthly snapshot/build/validate/publish workflow.
 
 Live raw-database compression is deliberately absent from this sequence. It
 may be reconsidered later if storage pressure justifies the added operational
