@@ -453,3 +453,68 @@ pushed without separate approval. The detailed plan is
 `HOSTED_OPENING_EXPLORER_PLAN_2026-08-03.md`.
 
 No full build or deployment occurred at this checkpoint.
+
+## 3 August 2026 hosted pre-deployment checkpoint (historical)
+
+This checkpoint is retained to show the approval boundary that preceded the
+completed representative experiment below.
+
+The provider research and local gate are complete enough to narrow the first
+external experiment without freezing the final host. A bundled-artifact Python
+Vercel Function is the provisional representative candidate; Blob
+materialization is sample-viable but has a 500 MB `/tmp` full-scale dead end;
+Neon/Turso require a measured relational projection; Edge Config and Upstash
+remain metadata/cache-only; and an external container remains the control.
+
+The next roadmap item is intentionally split into two approvals:
+
+1. deploy only the standalone compatibility probe and exact representative to a
+   protected Vercel Preview service project; measure bundle size/read-only
+   behavior, checksum, mmap, cold/warm/restart, concurrency, region, duration,
+   response size, RSS/disk, and usage;
+2. only if that evidence passes, authorize the hosted reader and a protected
+   `bughouse-chess` Preview, then run the shared navigation/filter/terminal/
+   stale/cancellation corpus and the HTTP/Cache Storage/IndexedDB comparison.
+
+Production promotion, a `bughouse-chess` push, full build, alternate store, or
+external container is not implied by either step. The current decision record
+and costs are in `HOSTING_PROVIDER_COMPARISON_2026-08-03.md`.
+
+## 3 August 2026 hosted representative result
+
+The two approval gates were completed without a source push. The standalone
+Vercel Function probe passed, the authenticated representative reader was
+deployed, and an exact-host `bughouse-chess` experiment now exercises it over
+HTTPS. A corrected web deployment replaced the first experiment after a
+browser-discovered filtered-backtrack bug was fixed test-first. The normal `/`
+viewer remains intact and no deployment was promoted from Preview.
+
+The representative hosting decision is bundled Python Function plus the
+same-origin Next.js proxy. Vercel Blob adds a cold 36.8 MB materialization and a
+500 MB scratch dead end at projected scale. Neon and Turso would add an
+unmeasured relational projection. Edge Config and Upstash remain metadata/
+cache-only support roles, and the external container remains the comparison
+control. At current experimental traffic the incremental cost is estimated at
+$0 while the dated Hobby allowances are not exceeded.
+
+The browser persistence decision is also complete for this slice: retain the
+5,000-node memory LRU and native immutable HTTP caching. The measured warm deep
+response took 0.3 ms with zero transfer. Cache Storage and IndexedDB did not
+earn their application complexity.
+
+Remaining roadmap items are:
+
+1. evaluate real-user trial behavior and Vercel usage without disabling the
+   observed Security Checkpoint or increasing request budgets;
+2. configure a stable, exact-host Preview deployment if a separate preview URL
+   is still desired; Vercel does not allow Preview variables scoped to the
+   Production branch `main`, so use a non-Production branch or stable protected
+   alias rather than a wildcard;
+3. keep the previous deployment and artifact version available for rollback,
+   then remove the experiment by disabling the gate before deleting scoped
+   credentials;
+4. retain the reliable physical-write measurement gate before any full build;
+   and
+5. treat Vercel Large Functions beta, an external container, and database
+   projections as future full-scale research. Do not build or upload the 2.58 GB
+   projection without separate authorization.

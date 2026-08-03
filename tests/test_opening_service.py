@@ -1,3 +1,5 @@
+import asyncio
+
 from bughouse_explorer.opening.adapter import AdapterOutcome
 from bughouse_explorer.opening.model import QueryFilter
 import pytest
@@ -7,6 +9,7 @@ from bughouse_explorer.opening.service import (
     InvalidNodeId,
     OpeningReadService,
     StaleDatasetVersion,
+    create_opening_service,
 )
 from bughouse_explorer.opening.streaming import build_streaming_packed_index
 from opening_fixtures import E4, E5, corpus
@@ -25,6 +28,119 @@ def _artifact(tmp_path):
         temporary_directory=tmp_path / "temporary",
     )
     return artifact, report
+
+
+def _request(app, path, *, headers=(), query=""):
+    messages = []
+    received = False
+
+    async def receive():
+        nonlocal received
+        if received:
+            return {"type": "http.disconnect"}
+        received = True
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message):
+        messages.append(message)
+
+    async def run():
+        await app(
+            {
+                "type": "http",
+                "asgi": {"version": "3.0"},
+                "http_version": "1.1",
+                "method": "GET",
+                "scheme": "https",
+                "path": path,
+                "raw_path": path.encode(),
+                "query_string": query.encode(),
+                "root_path": "",
+                "headers": [(name.lower().encode(), value.encode()) for name, value in headers],
+                "client": ("127.0.0.1", 12345),
+                "server": ("service.example", 443),
+            },
+            receive,
+            send,
+        )
+
+    asyncio.run(run())
+    start = next(message for message in messages if message["type"] == "http.response.start")
+    body = b"".join(
+        message.get("body", b"")
+        for message in messages
+        if message["type"] == "http.response.body"
+    )
+    response_headers = {
+        name.decode().lower(): value.decode()
+        for name, value in start["headers"]
+    }
+    return start["status"], response_headers, body
+
+
+def test_http_boundary_separates_health_from_authenticated_readiness(tmp_path):
+    artifact, report = _artifact(tmp_path)
+    app = create_opening_service(artifact, bearer_token="preview-secret")
+
+    health_status, health_headers, health_body = _request(app, "/healthz")
+    unauthorized_status, _, _ = _request(app, "/readyz")
+    ready_status, ready_headers, ready_body = _request(
+        app,
+        "/readyz",
+        headers=(("authorization", "Bearer preview-secret"),),
+    )
+
+    assert health_status == 200
+    assert health_headers["cache-control"] == "no-store"
+    assert b'"status":"alive"' in health_body
+    assert unauthorized_status == 401
+    assert ready_status == 200
+    assert ready_headers["cache-control"] == "private, no-cache"
+    assert report.build_id.encode() in ready_body
+    assert b'"status":"ready"' in ready_body
+
+
+def test_http_boundary_emits_deterministic_validator_and_honors_if_none_match(tmp_path):
+    artifact, _report = _artifact(tmp_path)
+    app = create_opening_service(artifact, bearer_token="preview-secret")
+    authorization = ("authorization", "Bearer preview-secret")
+
+    status, headers, first_body = _request(
+        app,
+        "/api/meta",
+        headers=(authorization,),
+    )
+    not_modified, second_headers, second_body = _request(
+        app,
+        "/api/meta",
+        headers=(authorization, ("if-none-match", headers["etag"])),
+    )
+
+    assert status == 200
+    assert headers["cache-control"] == "private, no-cache"
+    assert headers["etag"].startswith('"')
+    assert first_body
+    assert not_modified == 304
+    assert second_headers["etag"] == headers["etag"]
+    assert second_body == b""
+
+
+def test_http_neighborhood_body_and_validator_exclude_runtime_timing(tmp_path):
+    artifact, report = _artifact(tmp_path)
+    app = create_opening_service(artifact)
+    query = f"dataset_version={report.build_id}&max_nodes=20&max_encoded_bytes=32000"
+
+    first_status, first_headers, first_body = _request(
+        app, "/api/nodes/0/neighborhood", query=query
+    )
+    second_status, second_headers, second_body = _request(
+        app, "/api/nodes/0/neighborhood", query=query
+    )
+
+    assert first_status == second_status == 200
+    assert first_headers["etag"] == second_headers["etag"]
+    assert first_body == second_body
+    assert first_headers["server-timing"] != ""
 
 
 def test_service_reports_validated_versioned_dataset_metadata(tmp_path):

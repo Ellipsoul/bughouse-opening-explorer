@@ -1,0 +1,13 @@
+# Standalone compatibility-probe allowlist. The live service receives its own
+# reviewed deployment manifest only after this probe passes.
+/*
+!api
+!api/**
+!artifacts
+!artifacts/opening
+!artifacts/opening/representative-mod71-v2-a
+!artifacts/opening/representative-mod71-v2-a/**
+!bughouse_explorer
+!bughouse_explorer/**
+!pyproject.toml
+!vercel.probe.json

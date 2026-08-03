@@ -261,11 +261,26 @@ def main():
                 )["games"]
             )
         )
+        internal_games = service.game_examples(
+            dataset_version=version, node_id=internal_ending, limit=3
+        )
+        drop_games = service.game_examples(
+            dataset_version=version, node_id=drop_node, limit=3
+        )
         edge_cases = {
-            "internal_actual_ending": service.game_examples(
-                dataset_version=version, node_id=internal_ending, limit=3
-            ),
+            "internal_actual_ending": {
+                "actual_ending_count": internal_games["actual_ending_count"],
+                "node_id": internal_ending,
+                "returned_examples": len(internal_games["games"]),
+                "total_matching": internal_games["total_matching"],
+            },
             "retained_short_checkmate_with_drop": {
+                "actual_ending_count": drop_games["actual_ending_count"],
+                "has_checkmate": any(
+                    game["white_result"] == "checkmated"
+                    or game["black_result"] == "checkmated"
+                    for game in drop_games["games"]
+                ),
                 "path": service.neighborhood(
                     dataset_version=version,
                     anchor_node_id=drop_node,
@@ -273,9 +288,8 @@ def main():
                     max_nodes=100,
                     max_encoded_bytes=64 * 1024,
                 )["path"],
-                "games": service.game_examples(
-                    dataset_version=version, node_id=drop_node, limit=3
-                ),
+                "returned_examples": len(drop_games["games"]),
+                "total_matching": drop_games["total_matching"],
             },
         }
         filter_change = service.neighborhood(

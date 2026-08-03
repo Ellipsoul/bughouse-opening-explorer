@@ -1,0 +1,19 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "builds": [
+    {
+      "src": "api/compatibility_probe.py",
+      "use": "@vercel/python",
+      "config": {
+        "includeFiles": "artifacts/opening/representative-mod71-v2-a/**",
+        "maxDuration": 60
+      }
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/compatibility_probe",
+      "dest": "api/compatibility_probe.py"
+    }
+  ]
+}

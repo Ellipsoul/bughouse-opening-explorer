@@ -1,0 +1,123 @@
+{
+  "artifact": {
+    "accepted_games": 91911,
+    "component_bytes": 36782672,
+    "dataset_version": "e1400ceb14e26dc3cd09e93ac1a4630e88c2ac03",
+    "format_version": "packed-prefix-interval-v2",
+    "name": "representative-mod71-v2-a"
+  },
+  "browser_cache": {
+    "cache_storage_one_bounded_response": {
+      "cleanup_ms": 0.2,
+      "persistent_bytes_delta": 9569,
+      "read_ms": 0.7,
+      "response_bytes": 8690,
+      "write_ms": 1.2
+    },
+    "http_deep_node_1907": {
+      "cold": {
+        "decoded_body_bytes": 8690,
+        "duration_ms": 308.8,
+        "encoded_body_bytes": 1190,
+        "transfer_bytes": 1490
+      },
+      "warm_reload": {
+        "decoded_body_bytes": 8690,
+        "duration_ms": 0.3,
+        "encoded_body_bytes": 1190,
+        "transfer_bytes": 0
+      }
+    },
+    "indexeddb_one_current_and_one_stale_record": {
+      "cleanup_ms": 0.4,
+      "corruption_detected_and_removed": true,
+      "dataset_version_gc_ms": 0.8,
+      "persistent_bytes_delta": 22789,
+      "read_ms": 0.4,
+      "schema_upgrade_ms": 1.6,
+      "write_ms": 0.7
+    },
+    "selected_second_tier": "immutable HTTP cache",
+    "selection_reason": "The native warm hit was 0.3 ms with zero transfer; Cache Storage and IndexedDB added persistence, schema, cleanup, and write paths without a material measured navigation benefit."
+  },
+  "browser_functional_corpus": {
+    "back_forward": "passed",
+    "direct_deep_link": "passed",
+    "filter_change_and_cached_backtrack": "passed after a test-first correction",
+    "internal_ending_node_1907": "passed: 20 matching games, one actual ending, and continuing moves",
+    "normal_root_route": "HTTP 200 and unchanged",
+    "popular_mainline_node_ids": [
+      0,
+      61223,
+      96218,
+      114287,
+      121291,
+      122739,
+      123280
+    ],
+    "retained_drop_checkmate_node_13983": "passed: two games, two actual endings, no continuation",
+    "sidebar_and_direct_route": "passed",
+    "sole_game_support_one_node_1": "passed with lazy bounded game details",
+    "stale_dataset_version": "HTTP 409",
+    "stale_request_cancellation": "passed unit and integration coverage"
+  },
+  "compatibility_probe": {
+    "artifact_static_route": "not exposed",
+    "checksum_and_reader_initialization_ms": 617.87,
+    "concurrent_random_reads": 64,
+    "concurrent_random_read_failures": 0,
+    "peak_rss_after_concurrent_reads_bytes": 45867008,
+    "python_version": "3.12.13",
+    "task_filesystem": "read-only",
+    "tmp_free_bytes": 538333184,
+    "tmp_one_mebibyte_round_trip": "passed",
+    "warm_reuse": "same instance, reader, and memory map observed"
+  },
+  "hosted_service_smoke": {
+    "authenticated_meta_ms": 258.0,
+    "authenticated_readiness_ms": 273.3,
+    "concurrent_root_elapsed_ms": [
+      627.294,
+      659.657,
+      670.239,
+      688.866,
+      732.144,
+      858.703,
+      2881.74,
+      3112.858
+    ],
+    "concurrent_root_latency": {
+      "p50_ms": 688.866,
+      "p95_ms": 3112.858,
+      "p99_ms": 3112.858
+    },
+    "concurrent_root_requests": 8,
+    "concurrent_root_statuses": [
+      200,
+      200,
+      200,
+      200,
+      200,
+      200,
+      200,
+      200
+    ],
+    "etag_revalidation_ms": 254.0,
+    "etag_revalidation_status": 304,
+    "hidden_artifact_status": 404,
+    "root_ms": 264.4,
+    "stale_version_ms": 141.7,
+    "stale_version_status": 409,
+    "unauthenticated_readiness_status": 401
+  },
+  "measurement_limit": {
+    "effect": "A later rapid 20-repeat scripted run was excluded from latency results.",
+    "observed": "Vercel Security Checkpoint returned HTTP 403 and Code 29 to requests, curl, and the headless browser after the burst.",
+    "reason": "The checkpoint is valid basic abuse protection and was not disabled or bypassed for benchmarking."
+  },
+  "recorded_at": "2026-08-03",
+  "versions": {
+    "deployment": "dpl_BznoEMsf1DsuJ3XoYpoGpDwEpmCG",
+    "service_deployment": "dpl_EFQgMysFNBRqQRqZctoMYtp8Pvar"
+  }
+}

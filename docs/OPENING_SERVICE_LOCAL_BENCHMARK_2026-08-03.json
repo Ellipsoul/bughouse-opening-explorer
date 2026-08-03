@@ -1,0 +1,162 @@
+{
+  "artifact": "/Users/aronteh/Desktop/Coding_Adventures/bughouse-opening-explorer/artifacts/opening/representative-mod71-v2-a",
+  "dataset_version": "e1400ceb14e26dc3cd09e93ac1a4630e88c2ac03",
+  "deterministic_responses": {
+    "exact_pair": true,
+    "player_as_black": true,
+    "player_as_white": true,
+    "unfiltered": true
+  },
+  "edge_cases": {
+    "internal_actual_ending": {
+      "actual_ending_count": 1,
+      "node_id": 1907,
+      "returned_examples": 3,
+      "total_matching": 20
+    },
+    "retained_short_checkmate_with_drop": {
+      "actual_ending_count": 2,
+      "has_checkmate": true,
+      "path": [
+        {
+          "move_token": null,
+          "node_id": 0
+        },
+        {
+          "move_token": "gv",
+          "node_id": 6134
+        },
+        {
+          "move_token": "5Q",
+          "node_id": 12448
+        },
+        {
+          "move_token": "vM",
+          "node_id": 13864
+        },
+        {
+          "move_token": "1T",
+          "node_id": 13982
+        },
+        {
+          "move_token": "=1",
+          "node_id": 13983
+        }
+      ],
+      "returned_examples": 2,
+      "total_matching": 2
+    }
+  },
+  "filter_change_cached_structural_nodes": 500,
+  "latency": {
+    "exact_pair": {
+      "p50_ms": 3.0647505,
+      "p95_ms": 3.185792,
+      "p99_ms": 3.246708
+    },
+    "player_as_black": {
+      "p50_ms": 7.4921045,
+      "p95_ms": 7.77075,
+      "p99_ms": 7.876375
+    },
+    "player_as_white": {
+      "p50_ms": 7.2115415,
+      "p95_ms": 7.581208,
+      "p99_ms": 7.75025
+    },
+    "unfiltered": {
+      "p50_ms": 4.9295,
+      "p95_ms": 5.160417,
+      "p99_ms": 5.500667
+    }
+  },
+  "mainline_node_ids": [
+    0,
+    61223,
+    96218,
+    114287,
+    121291,
+    122739,
+    123280
+  ],
+  "response_sizes": {
+    "exact_pair": {
+      "compressed_bytes": 15472,
+      "encoded_bytes": 147782,
+      "frontiers": 357,
+      "nodes": 500
+    },
+    "player_as_black": {
+      "compressed_bytes": 16238,
+      "encoded_bytes": 150593,
+      "frontiers": 357,
+      "nodes": 500
+    },
+    "player_as_white": {
+      "compressed_bytes": 16416,
+      "encoded_bytes": 151563,
+      "frontiers": 357,
+      "nodes": 500
+    },
+    "unfiltered": {
+      "compressed_bytes": 20597,
+      "encoded_bytes": 173244,
+      "frontiers": 357,
+      "nodes": 500
+    }
+  },
+  "service_incremental_peak_rss_bytes": 9945088,
+  "service_startup_ms": 110.85387493949383,
+  "strategies": {
+    "adaptive_depth_5": {
+      "compressed_response_bytes": 38120,
+      "requests": 2,
+      "returned_nodes": 1000,
+      "uncompressed_response_bytes": 337843,
+      "unique_cached_nodes": 999,
+      "unused_prefetched_nodes": 992
+    },
+    "browser_complete_move_lists_adaptive_depth_5": {
+      "compressed_response_bytes": 38121,
+      "foreground_requests": 2,
+      "prefetch_requests": 0,
+      "requests": 2,
+      "returned_nodes": 1000,
+      "uncompressed_response_bytes": 337843,
+      "unique_cached_nodes": 999,
+      "unused_prefetched_nodes": 992
+    },
+    "fixed_depth_1": {
+      "compressed_response_bytes": 9203,
+      "requests": 6,
+      "returned_nodes": 148,
+      "uncompressed_response_bytes": 55519,
+      "unique_cached_nodes": 143,
+      "unused_prefetched_nodes": 136
+    },
+    "fixed_depth_3": {
+      "compressed_response_bytes": 69148,
+      "requests": 2,
+      "returned_nodes": 2027,
+      "uncompressed_response_bytes": 656945,
+      "unique_cached_nodes": 2026,
+      "unused_prefetched_nodes": 2019
+    },
+    "fixed_depth_5": {
+      "compressed_response_bytes": 83641,
+      "requests": 2,
+      "returned_nodes": 2386,
+      "uncompressed_response_bytes": 776389,
+      "unique_cached_nodes": 2385,
+      "unused_prefetched_nodes": 2378
+    },
+    "one_node_request_per_move": {
+      "compressed_response_bytes": 10530,
+      "requests": 7,
+      "returned_nodes": 171,
+      "uncompressed_response_bytes": 63695,
+      "unique_cached_nodes": 165,
+      "unused_prefetched_nodes": 158
+    }
+  }
+}

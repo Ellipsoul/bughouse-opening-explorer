@@ -193,3 +193,49 @@ The slice is complete when:
    documented with their assumptions and dates; and
 7. no crawler/raw database/full build was touched, and no production exposure or
    `bughouse-chess` push occurred without separate approval.
+
+## Execution result — 3 August 2026
+
+The representative slice reached a measured hosting decision. The live
+compatibility probe passed first, after which the authenticated packed reader
+and exact-host `bughouse-chess` experiment were deployed with explicit approval.
+No source commit or push was made.
+
+- The representative winner is the bundled-artifact Python Vercel Function.
+  Checksum plus cold reader initialization was 617.87 ms; the warm call reused
+  the same reader/mmap; 64 concurrent random reads had zero failures; peak RSS
+  stayed below 46 MB; `/var/task` was read-only; and `/tmp` passed a 1 MiB
+  round trip with about 538 MB free.
+- The service validates before readiness, reports dataset/format/adapter/policy
+  versions, requires a server-only bearer token, enforces hard budgets and
+  bounded concurrency, returns deterministic ETags, and exposes separate public
+  liveness and authenticated readiness. Artifact paths are not statically
+  routed.
+- The browser continues through the same-origin proxy. The service origin and
+  credential remain server-only and exact-allowlisted. Local, Preview, and the
+  separately approved Production experiment have distinct gate names; the old
+  local flag cannot enable a hosted build.
+- Route, sidebar, popular mainline, branch/backtrack, direct deep link,
+  back/forward, White filter, filter changes, support-one, internal ending,
+  retained drop checkmate, lazy sole-game details, unavailable/stale handling,
+  and stale request cancellation passed hosted or focused automated checks. A
+  browser-discovered filtered-backtrack defect was corrected test-first.
+- Immutable HTTP caching won the persistent-cache comparison. A deep response
+  took 308.8 ms cold and 0.3 ms with zero transfer on warm revisit. Cache
+  Storage and IndexedDB both worked, including version cleanup and corrupt
+  record recovery, but added application persistence machinery without a
+  material measured benefit.
+- A later rapid scripted repetition triggered Vercel Security Checkpoint 403 /
+  Code 29. Those blocked responses were excluded from latency results; the
+  checkpoint was preserved as basic abuse protection rather than bypassed for a
+  prettier benchmark.
+
+Evidence is in
+[`HOSTING_PROVIDER_COMPARISON_2026-08-03.md`](HOSTING_PROVIDER_COMPARISON_2026-08-03.md),
+[`HOSTED_OPENING_SERVICE_BENCHMARK_2026-08-03.json`](HOSTED_OPENING_SERVICE_BENCHMARK_2026-08-03.json),
+and [`BROWSER_CACHE_COMPARISON_2026-08-03.md`](BROWSER_CACHE_COMPARISON_2026-08-03.md).
+
+The full-scale decision remains open. The projected 2.58 GB packed artifact does
+not fit the standard 500 MB Python bundle route. Vercel Large Functions beta is
+relevant but is not authorization to build the full artifact or assume beta
+production characteristics.

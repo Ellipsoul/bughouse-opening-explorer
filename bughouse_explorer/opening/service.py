@@ -2,10 +2,13 @@
 
 from bisect import bisect_left
 import argparse
+import asyncio
 from contextlib import asynccontextmanager
+import hashlib
 import heapq
 import json
 from pathlib import Path
+import secrets
 import time
 
 from .model import QueryFilter
@@ -484,13 +487,28 @@ class OpeningReadService:
         }
 
 
-def create_opening_service(artifact):
-    """Create the experimental localhost HTTP app after validating the artifact."""
+def create_opening_service(
+    artifact,
+    *,
+    allowed_origins=("http://127.0.0.1:3000", "http://localhost:3000"),
+    bearer_token=None,
+    max_concurrency=8,
+    concurrency_wait_seconds=0.05,
+):
+    """Create a bounded HTTP app after validating the immutable artifact."""
     from fastapi import FastAPI, Query, Request
     from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import JSONResponse
+    from fastapi.responses import JSONResponse, Response
+
+    if not isinstance(max_concurrency, int) or max_concurrency < 1:
+        raise ValueError("max_concurrency must be a positive integer")
+    if not 0 < concurrency_wait_seconds <= 5:
+        raise ValueError("concurrency_wait_seconds must be between 0 and 5")
+    if bearer_token is not None and not bearer_token:
+        raise ValueError("bearer_token must be non-empty when configured")
 
     reader = OpeningReadService(artifact)
+    semaphore = asyncio.Semaphore(max_concurrency)
 
     @asynccontextmanager
     async def lifespan(_app):
@@ -500,16 +518,94 @@ def create_opening_service(artifact):
             reader.close()
 
     app = FastAPI(
-        title="Local Bughouse Opening Explorer",
+        title="Bughouse Opening Explorer Read Boundary",
         version="experimental-v1",
         lifespan=lifespan,
     )
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://127.0.0.1:3000", "http://localhost:3000"],
+        allow_origins=list(allowed_origins),
         allow_methods=["GET"],
-        allow_headers=["*"],
+        allow_headers=["authorization", "if-none-match"],
     )
+
+    @app.middleware("http")
+    async def protect_and_bound(request: Request, call_next):
+        if request.url.path == "/healthz":
+            return await call_next(request)
+        if bearer_token is not None:
+            supplied = request.headers.get("authorization", "")
+            expected = f"Bearer {bearer_token}"
+            if not secrets.compare_digest(supplied, expected):
+                return JSONResponse(
+                    status_code=401,
+                    content={"code": "unauthorized"},
+                    headers={
+                        "cache-control": "no-store",
+                        "www-authenticate": "Bearer",
+                    },
+                )
+        try:
+            await asyncio.wait_for(
+                semaphore.acquire(), timeout=concurrency_wait_seconds
+            )
+        except TimeoutError:
+            return JSONResponse(
+                status_code=503,
+                content={"code": "concurrency_limit"},
+                headers={"cache-control": "no-store", "retry-after": "1"},
+            )
+        try:
+            return await call_next(request)
+        finally:
+            semaphore.release()
+
+    def versioned_response(request, payload, *, immutable=True):
+        timing = None
+        if isinstance(payload, dict) and isinstance(
+            payload.get("instrumentation"), dict
+        ):
+            payload = dict(payload)
+            payload["instrumentation"] = dict(payload["instrumentation"])
+            timing = payload["instrumentation"].get("elapsed_microseconds")
+            payload["instrumentation"]["elapsed_microseconds"] = 0
+            payload["instrumentation"]["encoded_bytes"] = 0
+            for _iteration in range(3):
+                body = json.dumps(
+                    payload, separators=(",", ":"), sort_keys=True
+                ).encode()
+                payload["instrumentation"]["encoded_bytes"] = len(body)
+        body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+        etag = f'"{hashlib.sha256(body).hexdigest()}"'
+        headers = {
+            "cache-control": (
+                "private, max-age=31536000, immutable"
+                if immutable
+                else "private, no-cache"
+            ),
+            "etag": etag,
+        }
+        if timing is not None:
+            headers["server-timing"] = f"reader;dur={timing / 1_000:.3f}"
+        if request.headers.get("if-none-match") == etag:
+            return Response(status_code=304, headers=headers)
+        return Response(
+            content=body,
+            media_type="application/json",
+            headers=headers,
+        )
+
+    @app.get("/healthz")
+    def health():
+        return JSONResponse(
+            content={"status": "alive"}, headers={"cache-control": "no-store"}
+        )
+
+    @app.get("/readyz")
+    def readiness(request: Request):
+        return versioned_response(
+            request, {"status": "ready", **reader.metadata()}, immutable=False
+        )
 
     @app.exception_handler(StaleDatasetVersion)
     async def stale_handler(_request: Request, error: StaleDatasetVersion):
@@ -563,11 +659,12 @@ def create_opening_service(artifact):
         )
 
     @app.get("/api/meta")
-    def metadata():
-        return reader.metadata()
+    def metadata(request: Request):
+        return versioned_response(request, reader.metadata(), immutable=False)
 
     @app.get("/api/nodes/{node_id}/neighborhood")
     def neighborhood(
+        request: Request,
         node_id: int,
         dataset_version: str,
         target_forward_depth: int = DEFAULT_TARGET_DEPTH,
@@ -576,40 +673,51 @@ def create_opening_service(artifact):
         white: str | None = None,
         black: str | None = None,
     ):
-        return reader.neighborhood(
-            dataset_version=dataset_version,
-            anchor_node_id=node_id,
-            target_forward_depth=target_forward_depth,
-            max_nodes=max_nodes,
-            max_encoded_bytes=max_encoded_bytes,
-            query_filter=query_filter(white, black),
+        return versioned_response(
+            request,
+            reader.neighborhood(
+                dataset_version=dataset_version,
+                anchor_node_id=node_id,
+                target_forward_depth=target_forward_depth,
+                max_nodes=max_nodes,
+                max_encoded_bytes=max_encoded_bytes,
+                query_filter=query_filter(white, black),
+            ),
         )
 
     @app.get("/api/nodes/{node_id}/games")
     def games(
+        request: Request,
         node_id: int,
         dataset_version: str,
         limit: int = 6,
         white: str | None = None,
         black: str | None = None,
     ):
-        return reader.game_examples(
-            dataset_version=dataset_version,
-            node_id=node_id,
-            limit=limit,
-            query_filter=query_filter(white, black),
+        return versioned_response(
+            request,
+            reader.game_examples(
+                dataset_version=dataset_version,
+                node_id=node_id,
+                limit=limit,
+                query_filter=query_filter(white, black),
+            ),
         )
 
     @app.get("/api/players")
     def players(
+        request: Request,
         dataset_version: str,
         prefix: str = Query(min_length=1, max_length=32),
         limit: int = 10,
     ):
-        return reader.search_players(
-            dataset_version=dataset_version,
-            prefix=prefix,
-            limit=limit,
+        return versioned_response(
+            request,
+            reader.search_players(
+                dataset_version=dataset_version,
+                prefix=prefix,
+                limit=limit,
+            ),
         )
 
     return app

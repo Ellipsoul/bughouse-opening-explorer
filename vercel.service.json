@@ -1,0 +1,15 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "builds": [
+    {
+      "src": "api/opening_service.py",
+      "use": "@vercel/python",
+      "config": {
+        "includeFiles": "artifacts/opening/representative-mod71-v2-a/**"
+      }
+    }
+  ],
+  "routes": [
+    { "src": "/(.*)", "dest": "api/opening_service.py" }
+  ]
+}

@@ -470,3 +470,83 @@ correctness oracle. Any persistent browser tier—HTTP cache, Cache Storage, or
 IndexedDB—sits beneath the 5,000-node memory LRU and is selected by measured
 network and revisit benefit. See
 `HOSTED_OPENING_EXPLORER_PLAN_2026-08-03.md`.
+
+## Hosted read-boundary refinement — 3 August 2026 (pre-deployment record)
+
+This section preserves the design before the live probe. The implemented result
+is recorded in the later hosted-boundary section.
+
+The pre-deployment design keeps the packed artifact as the oracle and selects a
+bundled Python Vercel Function provisionally for the representative experiment.
+This choice is contingent on a standalone live compatibility gate; local mmap
+success is not treated as proof of Vercel bundle extraction, cold start, warm
+reuse, concurrency, or regional latency. The external-container control retains
+the same reader so provider effects can be separated from representation effects.
+
+The HTTP boundary validates the immutable artifact before readiness and exposes
+separate liveness/readiness operations. Versioned reads retain the settled hard
+budgets and add bearer authentication, bounded concurrency with a short queue,
+deterministic strong validators, immutable private cache directives, and timing
+headers that do not destabilize response bodies. The Next.js proxy remains the
+preferred browser boundary: it strictly allowlists paths and HTTPS origins,
+owns the server-only credential, applies a strict timeout, forwards validators,
+and does not expose the artifact or any corpus to browser storage.
+
+Preview exposure is a distinct environment capability rather than a weakened
+Production guard. Server rendering requires `VERCEL_ENV=preview`, an explicit
+preview flag, and an exact request-host allowlist. Client sidebar visibility
+uses the same pure decision and exact host; Production has no enabling path in
+this slice. Disabled page and proxy paths return not-found behavior.
+
+HTTP caching is the baseline persistent tier. Cache Storage and IndexedDB may
+store only complete bounded responses keyed by immutable dataset and normalized
+query identity, remain subordinate to the 5,000-node memory LRU, and require
+measured hosted benefit before selection. The packed artifact, raw data, and an
+unbounded username corpus never enter browser storage.
+
+See `HOSTING_PROVIDER_COMPARISON_2026-08-03.md` for current provider constraints,
+costs, correction/rollback/removal procedures, and the external approval gate.
+
+## Implemented hosted representative boundary — 3 August 2026
+
+The representative deployment keeps the same architectural seam:
+
+```text
+validated packed artifact in read-only Function bundle
+  -> one checksum-validated memory-mapped Python reader per warm instance
+  -> authenticated bounded HTTPS read API
+  -> exact-allowlisted server-side Next.js proxy
+  -> immutable versioned HTTP response
+  -> 5,000-node browser memory LRU
+```
+
+The compatibility probe proved that the first two steps work in Vercel's Python
+runtime for the 36,782,672-byte artifact. Readiness is false until every
+manifest checksum has passed. Liveness is public; readiness and reads require a
+server-only bearer token. No service route exposes the deployment artifact.
+Requests pass through a short bounded concurrency queue and retain the 500-node/
+256 KiB defaults and 4,000-node/512 KiB hard caps.
+
+The Next.js boundary remains preferable to direct browser-to-service access. It
+keeps the origin and token server-only, allowlists only metadata, player-prefix,
+neighborhood, and bounded-game paths, applies a strict timeout, forwards
+validators and timing, and maps configuration/network failures to a bounded 503.
+Page, sidebar, and proxy use one exact-host decision. Local, Preview, and the
+separately approved Production experiment are different capabilities; none is
+derived from a wildcard hostname or a public credential.
+
+HTTP caching is now the settled persistent browser tier for the representative
+version. Cache keys include the immutable dataset version and normalized query.
+Cache Storage and IndexedDB remain valid future alternatives, but are not part
+of the current architecture because native HTTP caching measured a 0.3 ms,
+zero-transfer warm revisit. Filtered overlays remain in memory only.
+
+Correction preserves immutability: stage and validate a new artifact/version,
+deploy it separately, pass readiness and the semantic corpus, then change the
+web boundary. Rollback restores the previous deployment/version. Removal first
+disables and redeploys the exact-host flag, validates route/proxy not-found
+behavior, then removes deployments and scoped credentials.
+
+This architecture is selected only for the representative artifact. The
+projected 2.58 GB file exceeds the standard Function bundle limit; no full
+artifact path is frozen.
