@@ -425,8 +425,10 @@ and zero idle refills; the earlier edge-presence-only comparison was
 insufficient to detect partial visited branches.
 
 Workstream E's local Next.js route, accessible sidebar link, one-board replay,
-filters, bounded LRU, frontier refill, lazy games, and instrumentation are
-implemented behind a production-disabled local flag. It remains a separate
+filters, bounded LRU, frontier refill, lazy games, and instrumentation were
+initially implemented behind a production-disabled local flag. The later
+representative production trial retired that availability flag, as recorded in
+the 3 August 2026 completion checkpoint below. The explorer remains a separate
 page and did not change the two-board viewer.
 
 The next authorized slice uses the validated representative artifact to measure
@@ -448,8 +450,10 @@ open. The gates, in order, are:
 5. separately retain the credible physical-write gate before any future full
    build authorization.
 
-The current production-disabled `bughouse-chess` flag must not be weakened or
-pushed without separate approval. The detailed plan is
+At this historical checkpoint, the production-disabled `bughouse-chess` flag
+was not to be weakened or pushed without separate approval. That approval was
+later given and the availability gates were retired after the representative
+production trial. The detailed historical plan is
 `HOSTED_OPENING_EXPLORER_PLAN_2026-08-03.md`.
 
 No full build or deployment occurred at this checkpoint.
@@ -506,15 +510,46 @@ Remaining roadmap items are:
 
 1. evaluate real-user trial behavior and Vercel usage without disabling the
    observed Security Checkpoint or increasing request budgets;
-2. configure a stable, exact-host Preview deployment if a separate preview URL
-   is still desired; Vercel does not allow Preview variables scoped to the
-   Production branch `main`, so use a non-Production branch or stable protected
-   alias rather than a wildcard;
-3. keep the previous deployment and artifact version available for rollback,
-   then remove the experiment by disabling the gate before deleting scoped
-   credentials;
-4. retain the reliable physical-write measurement gate before any full build;
+2. keep the previous deployment and artifact version available for rollback;
+3. retain the reliable physical-write measurement gate before any full build;
    and
-5. treat Vercel Large Functions beta, an external container, and database
-   projections as future full-scale research. Do not build or upload the 2.58 GB
-   projection without separate authorization.
+4. treat Vercel Large Functions beta, an external container, and database
+   projections as full-scale research rather than assuming the representative
+   host will scale unchanged.
+
+The route, sidebar, and proxy availability gates were retired after the
+representative Production trial. Operational protections remain server-only and
+the normal two-board viewer remains isolated.
+
+## Next milestone — measured full opening tree
+
+The authorized next investigation is specified in
+[`FULL_OPENING_TREE_SCALE_UP_PLAN_2026-08-03.md`](FULL_OPENING_TREE_SCALE_UP_PLAN_2026-08-03.md).
+
+Sequence:
+
+1. instrument the representative cold and warm first-load path, separating
+   browser route/hydration, metadata, proxy, process import, manifest/checksum
+   validation, mmap/reader construction, bounded neighborhood, transfer, cache
+   merge, replay, and first useful paint;
+2. classify each phase by its scaling variable and establish repeated
+   representative P50/P95/P99 plus CPU/RSS/mapped/resident/page-fault evidence;
+3. preflight an explicit separate restored snapshot, checksum, SQLite
+   integrity, free space, temporary amplification, and rollback headroom;
+4. build a new immutable full version with the deterministic streaming writer,
+   leaving the representative untouched;
+5. validate checksums, deterministic output, exact-prefix/terminal/filter/game
+   semantics, and actual final size/resource use;
+6. run identical representative and full local service/browser traces without
+   relaxing the 500-node/256 KiB defaults or 4,000-node/512 KiB hard caps;
+7. refresh current official Vercel Large Functions and provider constraints,
+   compare the bundled path with object storage and an external container, and
+   record cost/correction/rollback/removal/AGPL obligations; and
+8. present the evidence and obtain explicit approval before any full-artifact
+   upload, paid resource, Vercel mutation, or live version switch.
+
+The next slice should produce either a measured, reproducible local full-tree
+artifact and hosting decision or an evidence-backed blocker. It must never use
+`data/crawler.db` as a build input, contact Chess.com, expose the artifact or
+unbounded usernames to the browser, or weaken the settled node identity and
+bounded-query semantics.

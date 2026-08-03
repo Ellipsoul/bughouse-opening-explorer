@@ -267,6 +267,33 @@ the exact paths and obtaining any required cleanup authority.
 5. Consider rotation or storage-reduction experiments only after a newer
    checked snapshot exists.
 
+## Full opening-tree build input contract
+
+The full-tree scale-up must not read from or build directly against
+`data/crawler.db`. Before authorizing the writer, select an explicit separate
+restored snapshot and record:
+
+- absolute source path outside the live database path;
+- manifest and compressed/uncompressed SHA-256 values;
+- proof that the bytes came from the designated backup copy where applicable;
+- successful decompression/read-back comparison and SQLite `quick_check`;
+- foreign-key, closure, count, and invariant results;
+- accepted-game count observed by the opening adapter;
+- free space for the restored source, temporary writer state, final immutable
+  artifact, validation/rebuild evidence, and rollback headroom; and
+- the exact output directory, which must not be the representative artifact.
+
+If no current snapshot meets that contract, the full build is blocked pending
+a new checked backup/restore cycle. Do not silently substitute the live
+database or an unverified copy.
+
+The produced full artifact is derived and rebuildable, not a replacement raw
+backup. Publish it as a new immutable version with its own component checksums,
+build/source fingerprints, format/adapter/terminal-policy versions, timing and
+resource record, correction procedure, and deletion record. Retain the
+validated representative artifact as the correctness oracle and immediate
+service rollback until the full version has passed local and hosted validation.
+
 The SQLite online-backup behavior is documented at
 <https://www.sqlite.org/backup.html>. Per-table and per-index storage evidence
 can be measured read-only with `dbstat` as documented at

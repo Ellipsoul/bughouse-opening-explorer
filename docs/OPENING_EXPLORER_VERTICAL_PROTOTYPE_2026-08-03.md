@@ -208,14 +208,14 @@ viewer controllers, replay state, analysis state, move trees, match navigation,
 or existing URL state. The `/` route and its two-board components were not
 changed.
 
-The route and sidebar link share
-`NEXT_PUBLIC_ENABLE_OPENING_EXPLORER=true`, and the flag is forcibly false when
-`NODE_ENV=production`. Browser requests use the same-origin
-`/api/opening-explorer/...` proxy. The proxy permits only the four read-only
-explorer operation shapes, refuses non-loopback upstreams, and uses the
-server-only `OPENING_EXPLORER_SERVICE_URL` (default
-`http://127.0.0.1:8765`). It forwards responses without transforming the
-versioned service contract.
+The route, sidebar link, and proxy are now present in every build after the
+successful representative Production trial. Browser requests use the
+same-origin `/api/opening-explorer/...` proxy. The proxy permits only the four
+read-only explorer operation shapes and uses the server-only
+`OPENING_EXPLORER_SERVICE_URL` (default `http://127.0.0.1:8765`). Development
+permits only a loopback HTTP upstream; hosted origins require HTTPS, an exact
+server-side allowlist entry, and a bearer credential. It forwards responses
+without transforming the versioned service contract.
 
 The client:
 
@@ -263,7 +263,6 @@ Start the validated loopback service from the opening-explorer repository:
 Start the local Next.js experiment from `bughouse-chess`:
 
 ```bash
-NEXT_PUBLIC_ENABLE_OPENING_EXPLORER=true \
 OPENING_EXPLORER_SERVICE_URL=http://127.0.0.1:8765 \
 npm run dev
 ```
@@ -302,7 +301,7 @@ reported unavailable page. FastAPI metadata and CORS were healthy. The browser
 failure was an `Illegal invocation`: the client stored native `fetch` as a
 class field and invoked it with the API instance as its receiver. The repair
 binds the call to the browser global, keeps abort deduplication signal-aware,
-and routes local browser traffic through the feature-gated same-origin proxy.
+and routes local browser traffic through the same-origin proxy.
 Both an isolated browser and the user's Chrome then loaded dataset
 `e1400ceb14`, rendered the single board and 91,911-game root, and navigated the
 cached `e4` continuation. That navigation also revealed and fixed a repeated

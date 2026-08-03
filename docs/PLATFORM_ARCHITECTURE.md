@@ -15,7 +15,7 @@ flowchart TD
     index["Versioned immutable opening-index snapshot<br/>packed prefix intervals selected; SQLite baseline"]
     api["Local or hosted read-only service<br/>memory-mapped packed artifact"]
     cache["HTTP/CDN and server cache<br/>keyed by dataset version"]
-    proxy["Local-only Next.js read proxy<br/>feature-gated + loopback-only upstream"]
+    proxy["Next.js read proxy<br/>fixed paths + protected server-only upstream"]
     client["bughouse-chess Next.js interface<br/>budgeted neighborhood prefetch + client cache"]
 
     raw --> build
@@ -352,10 +352,11 @@ is behavioral reference material, not a second production application.
 10. Keep raw source JSON and crawl administration entirely outside browser
     reach.
 
-For the local experiment, the browser calls a same-origin, feature-gated
-Next.js proxy. It accepts only metadata, neighborhood, bounded-game, and
-player-prefix GET shapes and refuses non-loopback upstream origins. This is a
-local transport adapter, not a frozen production API layer.
+For the local experiment, the browser calls a same-origin Next.js proxy. It
+accepts only metadata, neighborhood, bounded-game, and player-prefix GET shapes
+and refuses non-loopback upstream origins. The route is always available, but a
+missing local reader produces a bounded 503. This is a transport adapter, not a
+frozen production API layer.
 
 A bounded neighborhood endpoint is the leading experiment, not yet a frozen
 production contract. Compare it with one-request-per-move and narrow parallel
@@ -492,11 +493,13 @@ preferred browser boundary: it strictly allowlists paths and HTTPS origins,
 owns the server-only credential, applies a strict timeout, forwards validators,
 and does not expose the artifact or any corpus to browser storage.
 
-Preview exposure is a distinct environment capability rather than a weakened
-Production guard. Server rendering requires `VERCEL_ENV=preview`, an explicit
-preview flag, and an exact request-host allowlist. Client sidebar visibility
-uses the same pure decision and exact host; Production has no enabling path in
-this slice. Disabled page and proxy paths return not-found behavior.
+The representative trial originally used a distinct Preview capability. After
+the trial passed and normal exposure was explicitly approved, the route,
+sidebar, and proxy availability gates were retired. The explorer now renders in
+local development, Preview, and Production; a missing or unreachable local
+reader produces a bounded 503 rather than hiding the feature. The service
+origin and bearer credential remain server-only, the origin and paths remain
+strictly allowlisted, and proxy timeouts and response budgets remain enforced.
 
 HTTP caching is the baseline persistent tier. Cache Storage and IndexedDB may
 store only complete bounded responses keyed by immutable dataset and normalized
@@ -531,9 +534,11 @@ The Next.js boundary remains preferable to direct browser-to-service access. It
 keeps the origin and token server-only, allowlists only metadata, player-prefix,
 neighborhood, and bounded-game paths, applies a strict timeout, forwards
 validators and timing, and maps configuration/network failures to a bounded 503.
-Page, sidebar, and proxy use one exact-host decision. Local, Preview, and the
-separately approved Production experiment are different capabilities; none is
-derived from a wildcard hostname or a public credential.
+Page, sidebar, and proxy are present in every build after the successful
+representative Production trial. Availability no longer depends on hostname or
+environment flags. The service origin and credential remain server-only;
+hosted origins require an exact allowlist entry and HTTPS, while development
+permits only a loopback HTTP reader.
 
 HTTP caching is now the settled persistent browser tier for the representative
 version. Cache keys include the immutable dataset version and normalized query.
@@ -544,9 +549,53 @@ zero-transfer warm revisit. Filtered overlays remain in memory only.
 Correction preserves immutability: stage and validate a new artifact/version,
 deploy it separately, pass readiness and the semantic corpus, then change the
 web boundary. Rollback restores the previous deployment/version. Removal first
-disables and redeploys the exact-host flag, validates route/proxy not-found
-behavior, then removes deployments and scoped credentials.
+redirects or removes the service version through an explicit code and
+configuration change, validates bounded unavailable behavior, then removes
+deployments and scoped credentials. The UI route may remain available with its
+unavailable state unless a separate approved product change removes it.
 
 This architecture is selected only for the representative artifact. The
 projected 2.58 GB file exceeds the standard Function bundle limit; no full
 artifact path is frozen.
+
+## Full-tree startup and scale boundary — next slice
+
+The browser startup path remains deliberately bounded:
+
+```text
+route/hydration
+  -> GET metadata
+  -> GET one root or deep-link neighborhood (500 nodes / 256 KiB default)
+  -> merge into 5,000-node memory LRU
+  -> replay the returned exact prefix and render
+```
+
+This path does not transfer the artifact to the browser. Scaling risk is split
+between cold readiness and request execution. The next slice must time process
+import, manifest parsing, every component checksum, file opens, mmap creation,
+first metadata, first bounded neighborhood, warm requests, client merge/replay,
+and first useful paint separately. Classify each phase as constant,
+file-count-dependent, artifact-byte-linear, postings-dependent, or request-
+budget-bounded.
+
+The leading hypothesis is that manifest checksum validation reads artifact
+bytes linearly, whereas mmap creation alone need not make all pages resident
+and an unfiltered neighborhood traversal remains bounded by node/byte limits.
+This must be verified with representative cold-process repetitions and the
+actual full artifact. Record CPU, wall time, mapped and resident bytes, page
+faults, disk reads, response sizes, and P50/P95/P99.
+
+The full artifact must be produced by the existing deterministic streaming
+writer from an explicit separate restored snapshot with a recorded checksum.
+Never build directly from `data/crawler.db`. Publish to a new immutable version,
+preserve the representative as oracle and rollback, validate every component,
+and compare identical navigation/filter/terminal/concurrency traces without
+relaxing response budgets.
+
+No production architecture is selected by the projected 2.58 GB size. Refresh
+current Vercel Large Functions limits and measure the built artifact; compare a
+bundled immutable artifact, object-storage materialization, and the existing
+reader in a small external container. A database projection must prove exact-
+prefix correctness and material operational benefit against the packed oracle.
+Any upload or live version switch requires separate approval after local
+evidence, cost, correction, rollback, removal, and AGPL procedures are reviewed.

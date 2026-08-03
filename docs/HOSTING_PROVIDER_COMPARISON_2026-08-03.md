@@ -145,27 +145,22 @@ of the approval-gated external step.
 The sanitized benchmark evidence is
 [`OPENING_SERVICE_LOCAL_BENCHMARK_2026-08-03.json`](OPENING_SERVICE_LOCAL_BENCHMARK_2026-08-03.json).
 
-## Protected preview and Production experiment contract
+## Current web and service-boundary contract
 
-`bughouse-chess` has separately named Preview and Production decisions. Hosted
-flags are server-only:
+After the representative Production trial passed, `bughouse-chess` retired the
+route/sidebar/proxy availability flags. Those surfaces now ship in local,
+Preview, and Production builds. Hosted service configuration remains
+server-only:
 
-- `OPENING_EXPLORER_PREVIEW_ENABLED=true`;
-- `OPENING_EXPLORER_PREVIEW_HOSTS=<exact preview hostname list>`;
-- `VERCEL_ENV=preview` on the server;
-- `OPENING_EXPLORER_PRODUCTION_ENABLED=true` only for the separately approved
-  trial;
-- `OPENING_EXPLORER_PRODUCTION_HOSTS=<exact Production hostname list>`;
 - `OPENING_EXPLORER_SERVICE_URL=<bare HTTPS origin>`;
 - `OPENING_EXPLORER_SERVICE_ALLOWED_ORIGINS=<exact origin list>`;
 - `OPENING_EXPLORER_SERVICE_TOKEN=<server-only bearer token>`; and
 - optional `OPENING_EXPLORER_SERVICE_TIMEOUT_MS`, bounded to 100–10,000 ms.
 
-The page and sidebar share the same pure decision. The page and proxy also
-enforce it server-side. The old local flag cannot enable a production-mode
-build. Production requires its own explicit flag, `VERCEL_ENV=production`, and
-an exact configured host; Preview uses different names and cannot enable
-Production. The service URL, token, and hosted flags are never `NEXT_PUBLIC_*`.
+Development permits only the loopback HTTP reader. Production-mode builds
+require an HTTPS service origin that exactly matches the server-side allowlist
+and a server-only credential. The service URL and token are never
+`NEXT_PUBLIC_*`.
 Vercel Authentication Standard Protection protects raw deployment URLs on
 Hobby; the generated deployment hostname returned the Vercel login boundary,
 while only the approved aliases served the experiment. [Deployment Protection](https://vercel.com/docs/deployment-protection),
@@ -202,18 +197,18 @@ live.
    stale version 409, invalid/budget errors, 304 validators, 512 KiB cap,
    concurrency 503, and no sensitive logs.
 6. Configure `bughouse-chess` with the service origin, origin allowlist, timeout,
-   and sensitive token in the intended Vercel scope. Configure a separately
-   named exact-host flag for Preview or, as explicitly approved here,
-   Production. Build and deploy without promotion.
+   and sensitive token in the intended Vercel scope. Build and deploy without
+   promotion.
 7. For correction, publish a separately versioned validated artifact; never
    overwrite the active version. Change only the Preview version/origin after
    readiness succeeds. Roll back by restoring the previous Preview pointer and
    redeploying Preview.
-8. Remove by first disabling the applicable named flag and redeploying. Validate
-   page and proxy not-found behavior, then delete the experiment deployment and
-   service deployment/project and remove scoped credentials. Recheck `/` and
-   the two-board viewer. Vercel project/deployment deletion is irreversible and
-   must not be run while the trial is wanted.
+8. Remove or redirect the service through an explicit approved configuration or
+   code deployment. Validate bounded unavailable behavior, then delete the
+   service deployment/project and remove scoped credentials. The always-present
+   page may continue to show its unavailable state. Recheck `/` and the
+   two-board viewer. Vercel project/deployment deletion is irreversible and
+   must not be run while the service is wanted.
 
 At that initial hosted checkpoint, no `promote` or `bughouse-chess` push
 occurred. The service correction was

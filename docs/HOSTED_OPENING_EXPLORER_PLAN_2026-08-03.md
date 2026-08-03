@@ -106,6 +106,12 @@ public use.
 
 ## Workstream C — Vercel preview and `bughouse-chess` integration
 
+> Historical design note: this section records the protection boundary before
+> the representative deployment. After the hosted trial passed and the user
+> approved normal exposure, the route, sidebar, and proxy availability gates
+> were retired. The server-only origin, allowlist, credential, timeout, and
+> response-budget protections remain current.
+
 Use a non-production Git branch and Vercel Preview Deployment as the default web
 test surface; do not promote it. The current feature gate deliberately makes
 the explorer unavailable in every production-mode build, including a normal
@@ -212,9 +218,10 @@ No source commit or push was made.
   liveness and authenticated readiness. Artifact paths are not statically
   routed.
 - The browser continues through the same-origin proxy. The service origin and
-  credential remain server-only and exact-allowlisted. Local, Preview, and the
-  separately approved Production experiment have distinct gate names; the old
-  local flag cannot enable a hosted build.
+  credential remain server-only and exact-allowlisted. After the approved
+  Production trial passed, the availability gates were retired; route, sidebar,
+  and proxy now ship in every build while the operational service protections
+  remain unchanged.
 - Route, sidebar, popular mainline, branch/backtrack, direct deep link,
   back/forward, White filter, filter changes, support-one, internal ending,
   retained drop checkmate, lazy sole-game details, unavailable/stale handling,
@@ -239,3 +246,27 @@ The full-scale decision remains open. The projected 2.58 GB packed artifact does
 not fit the standard 500 MB Python bundle route. Vercel Large Functions beta is
 relevant but is not authorization to build the full artifact or assume beta
 production characteristics.
+
+## Next slice — measured full-tree scale-up
+
+The next slice is defined in
+[`FULL_OPENING_TREE_SCALE_UP_PLAN_2026-08-03.md`](FULL_OPENING_TREE_SCALE_UP_PLAN_2026-08-03.md).
+It first separates browser metadata/neighborhood time from process import,
+manifest/checksum validation, mmap construction, bounded query work, transfer,
+and render. The client still fetches only metadata followed by one bounded
+neighborhood; it never downloads the packed artifact. Whole-artifact checksum
+readiness is the leading artifact-size-dependent hypothesis and must be measured
+rather than extrapolated from one representative cold start.
+
+After representative instrumentation, a full local build may use only an
+explicit separately restored, SQLite-validated snapshot with a recorded
+checksum. The retained representative remains immutable and available as the
+oracle and rollback. Record actual full size, writer amplification, build time,
+peak RSS, cold readiness, mapped/resident bytes, page faults, and identical
+semantic/browser traces.
+
+Production upload remains separately controlled. Refresh official Vercel Large
+Functions and related limits, compare the bundled path with object storage and
+an external container control, present current cost and rollback/removal
+procedures, and obtain explicit approval before any full-artifact upload,
+provider mutation, paid resource, or live version switch.
