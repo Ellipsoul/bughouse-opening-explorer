@@ -429,13 +429,27 @@ filters, bounded LRU, frontier refill, lazy games, and instrumentation are
 implemented behind a production-disabled local flag. It remains a separate
 page and did not change the two-board viewer.
 
-The next gates, in order, are:
+The next authorized slice uses the validated representative artifact to measure
+the real hosted boundary before any full build. Vercel-native options come first
+because `bughouse-chess` already uses Vercel, but the hosting decision remains
+open. The gates, in order, are:
 
-1. obtain a credible physical-write measurement for the streaming build;
-2. complete the remaining real-browser filter, back-forward, and stale-request
-   cancellation matrix now that loopback bootstrap and cached navigation pass;
-3. only then decide whether the full checked local artifact is authorized; and
-4. defer hosted API/CDN/authentication decisions until full-local query and UX
-   evidence exists.
+1. verify current Vercel Function, Blob, Preview Deployment, Edge Config, and
+   Marketplace limits from official sources; compare packaged-artifact and
+   Blob-materialization probes with Neon/Turso projections and an external
+   container control;
+2. deploy only the representative dataset to a protected Vercel preview or the
+   measured alternative, then run the complete hosted navigation, filter,
+   terminal, back-forward, cancellation, correction, and rollback corpus;
+3. compare immutable HTTP caching, Cache Storage, and IndexedDB as persistent
+   second tiers beneath the 5,000-node memory LRU;
+4. record representative cost and full-scale projections without building the
+   full artifact; and
+5. separately retain the credible physical-write gate before any future full
+   build authorization.
+
+The current production-disabled `bughouse-chess` flag must not be weakened or
+pushed without separate approval. The detailed plan is
+`HOSTED_OPENING_EXPLORER_PLAN_2026-08-03.md`.
 
 No full build or deployment occurred at this checkpoint.

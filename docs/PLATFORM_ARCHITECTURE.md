@@ -459,3 +459,14 @@ The complete evidence and commands are in
 blocked on reliable physical-write measurement. A later live retry validated
 the same-origin HTTP boundary and cached `e4` navigation in Chrome; the
 filter/cancellation/back-forward browser matrix remains outstanding.
+
+The next hosted experiment is deliberately representative-only. Because the
+web application already runs on Vercel, evaluate Vercel Functions with a
+packaged artifact, Vercel Blob with verified function-local materialization,
+Marketplace Neon/Turso projections, Preview Deployments, and narrowly scoped
+Edge Config/Upstash support before external compute. Retain an external
+container as a comparison control and preserve the packed artifact as the
+correctness oracle. Any persistent browser tier—HTTP cache, Cache Storage, or
+IndexedDB—sits beneath the 5,000-node memory LRU and is selected by measured
+network and revisit benefit. See
+`HOSTED_OPENING_EXPLORER_PLAN_2026-08-03.md`.
