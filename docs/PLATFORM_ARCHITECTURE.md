@@ -15,13 +15,15 @@ flowchart TD
     index["Versioned immutable opening-index snapshot<br/>packed prefix intervals selected; SQLite baseline"]
     api["Local or hosted read-only service<br/>memory-mapped packed artifact"]
     cache["HTTP/CDN and server cache<br/>keyed by dataset version"]
+    proxy["Local-only Next.js read proxy<br/>feature-gated + loopback-only upstream"]
     client["bughouse-chess Next.js interface<br/>budgeted neighborhood prefetch + client cache"]
 
     raw --> build
     build --> index
     index --> api
     api --> cache
-    cache --> client
+    cache --> proxy
+    proxy --> client
 ```
 
 In compact form:
@@ -40,9 +42,12 @@ The browser never receives either SQLite database or the complete packed
 artifact. It receives bounded, cacheable node neighborhoods and game details
 for the move-prefix region the user is currently exploring. The first product
 experiment runs the same boundary locally: a localhost service memory-maps a
-representative packed artifact and the local Next.js client queries it. A later
-hosted service can replace the localhost origin without replacing the client
-navigation model.
+representative packed artifact and a same-origin Next.js read proxy forwards
+the bounded client operations. This keeps the loopback origin server-only and
+avoids browser/extension cross-origin policy differences. The proxy does not
+transform responses. A later hosted service can replace this local transport
+adapter without replacing the versioned service contract or client navigation
+model.
 
 ## Design principles
 
@@ -274,9 +279,9 @@ especially after JSON encoding and filter aggregates.
 A neighborhood query should:
 
 1. always include the anchor and all of its immediate children;
-2. expand deeper continuations in descending support order, or another measured
-   deterministic priority, until the target depth is met or a hard node/byte
-   budget is exhausted;
+2. expand deeper continuations by descending-support parent, admitting that
+   parent's complete immediate move list as an atomic group only when the group
+   fits the hard node/byte budgets;
 3. return a flat collection keyed by node id so overlapping responses merge
    into the client cache without duplication;
 4. identify every truncated boundary as a frontier with `has_more` or equivalent
@@ -323,8 +328,9 @@ is behavioral reference material, not a second production application.
 1. Fetch a bounded node neighborhood and representative games independently,
    while allowing the board and immediate moves to render first.
 2. Cache flat structural records by `(dataset_version, node_id)` and filtered
-   overlays by the normalized filter tuple. Retain visited nodes in a bounded
-   LRU so ordinary backward navigation is local and instant.
+   overlays by the normalized filter tuple. Retain the visited path and its
+   cached immediate move lists in a bounded LRU so ordinary backward navigation
+   is complete, local, and instant.
 3. Treat depth five as a prefetch target, never an unconditional radius. Always
    fetch immediate moves, then expand high-support descendants only while the
    node and byte budgets permit.
@@ -345,6 +351,11 @@ is behavioral reference material, not a second production application.
    browser benchmarks.
 10. Keep raw source JSON and crawl administration entirely outside browser
     reach.
+
+For the local experiment, the browser calls a same-origin, feature-gated
+Next.js proxy. It accepts only metadata, neighborhood, bounded-game, and
+player-prefix GET shapes and refuses non-loopback upstream origins. This is a
+local transport adapter, not a frozen production API layer.
 
 A bounded neighborhood endpoint is the leading experiment, not yet a frozen
 production contract. Compare it with one-request-per-move and narrow parallel
@@ -416,3 +427,35 @@ operation; it does not write back into the crawler database.
 Live raw-database compression is deliberately absent from this sequence. It
 may be reconsidered later if storage pressure justifies the added operational
 and parsing complexity, but it is not a prerequisite for the opening explorer.
+
+## Implemented local vertical evidence — 3 August 2026
+
+The first local implementation now preserves the boundaries in this document:
+
+- `opening-adapter-v2-short-non-checkmate` is the counted adapter policy;
+- the selected writer uses an explicit external-sort SQLite stage and streams
+  packed records without retaining the corpus or logical trie as Python
+  objects;
+- `packed-prefix-interval-v2` replaces verbose game JSON lines with
+  independently compressed random-access records while keeping the selected
+  36-byte node and 6-byte edge layouts unchanged;
+- the read service validates then memory-maps an immutable version and binds
+  only loopback;
+- structural node/edge records and normalized-filter overlays are separate in
+  the response and client cache; and
+- the Next.js surface is an additive, local-only `/opening-explorer` page with
+  feature-owned state and replay code.
+
+Repeated samples project about 2.58 GB at full policy scale with 61–72 MB
+observed peak RSS. After atomic deeper-parent expansion, the 500-node/256 KiB
+adaptive default measured 2.99–7.16 ms P50 and below 8 ms P99 across
+unfiltered, independent-seat, and exact-pair root queries. A browser-policy
+simulation requiring complete move lists used two foreground requests and zero
+idle refills on a popular six-move trace. These are
+representative local measurements, not a hosted-service contract.
+
+The complete evidence and commands are in
+`OPENING_EXPLORER_VERTICAL_PROTOTYPE_2026-08-03.md`. A full build remains
+blocked on reliable physical-write measurement. A later live retry validated
+the same-origin HTTP boundary and cached `e4` navigation in Chrome; the
+filter/cancellation/back-forward browser matrix remains outstanding.

@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 import json
+import mmap
 import os
 from pathlib import Path
 import sqlite3
@@ -64,29 +65,44 @@ def validate_artifact(path):
             raise ValueError("packed node record size mismatch")
         if (path / "edges.bin").stat().st_size != manifest["edges"] * EDGE.size:
             raise ValueError("packed edge record size mismatch")
-        node_bytes = (path / "nodes.bin").read_bytes()
-        edge_bytes = (path / "edges.bin").read_bytes()
         ending_count = (path / "endings.bin").stat().st_size // 4
-        for node_id, node in enumerate(NODE.iter_unpack(node_bytes)):
-            start, end = node[2], node[3]
-            edge_start, edge_count = node[4], node[5]
-            ending_start, node_ending_count = node[6], node[7]
-            terminal = node[8]
-            if not 0 <= start < end <= manifest["games"]:
-                raise ValueError(f"packed node interval mismatch: {node_id}")
-            if edge_start + edge_count > manifest["edges"]:
-                raise ValueError(f"packed edge range mismatch: {node_id}")
-            if ending_start + node_ending_count > ending_count:
-                raise ValueError(f"packed ending range mismatch: {node_id}")
-            if terminal >= 0 and not start <= terminal < end:
-                raise ValueError(f"packed terminal interval mismatch: {node_id}")
-            for edge_index in range(edge_start, edge_start + edge_count):
-                _token, child = EDGE.unpack_from(edge_bytes, edge_index * EDGE.size)
-                if child >= manifest["nodes"]:
-                    raise ValueError(f"packed child id mismatch: {node_id}")
-        root = NODE.unpack_from(node_bytes, 0)
-        if root[2:4] != (0, manifest["games"]):
-            raise ValueError("packed root interval mismatch")
+        with (path / "nodes.bin").open("rb") as node_stream, (
+            path / "edges.bin"
+        ).open("rb") as edge_stream:
+            node_bytes = mmap.mmap(node_stream.fileno(), 0, access=mmap.ACCESS_READ)
+            edge_bytes = (
+                mmap.mmap(edge_stream.fileno(), 0, access=mmap.ACCESS_READ)
+                if manifest["edges"]
+                else None
+            )
+            try:
+                for node_id in range(manifest["nodes"]):
+                    node = NODE.unpack_from(node_bytes, node_id * NODE.size)
+                    start, end = node[2], node[3]
+                    edge_start, edge_count = node[4], node[5]
+                    ending_start, node_ending_count = node[6], node[7]
+                    terminal = node[8]
+                    if not 0 <= start < end <= manifest["games"]:
+                        raise ValueError(f"packed node interval mismatch: {node_id}")
+                    if edge_start + edge_count > manifest["edges"]:
+                        raise ValueError(f"packed edge range mismatch: {node_id}")
+                    if ending_start + node_ending_count > ending_count:
+                        raise ValueError(f"packed ending range mismatch: {node_id}")
+                    if terminal >= 0 and not start <= terminal < end:
+                        raise ValueError(f"packed terminal interval mismatch: {node_id}")
+                    for edge_index in range(edge_start, edge_start + edge_count):
+                        _token, child = EDGE.unpack_from(
+                            edge_bytes, edge_index * EDGE.size
+                        )
+                        if child >= manifest["nodes"]:
+                            raise ValueError(f"packed child id mismatch: {node_id}")
+                root = NODE.unpack_from(node_bytes, 0)
+                if root[2:4] != (0, manifest["games"]):
+                    raise ValueError("packed root interval mismatch")
+            finally:
+                if edge_bytes is not None:
+                    edge_bytes.close()
+                node_bytes.close()
         return PublishedVersion(
             path.resolve(), manifest["build_id"], f"packed-{manifest['postings']}"
         )

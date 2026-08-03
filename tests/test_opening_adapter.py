@@ -165,3 +165,39 @@ def test_adapter_selection_is_a_deterministic_source_rowid_sample(tmp_path):
     )
 
     assert [outcome.source_rowid for outcome in outcomes] == [1]
+
+
+def test_adapter_excludes_short_non_checkmates_but_retains_short_checkmates(tmp_path):
+    crawler_db = tmp_path / "crawler.db"
+    _crawler_fixture(crawler_db)
+    connection = sqlite3.connect(crawler_db)
+    connection.execute(
+        """
+        INSERT INTO games(
+            uuid, end_time, time_control, rated, rules, tcn, initial_setup,
+            url, source, raw_payload, content_hash
+        )
+        SELECT
+            'short-non-checkmate', end_time, time_control, rated, rules,
+            'mC0Kgv' || 'mC0Kgv', initial_setup, url, 'public', raw_payload,
+            'content-short'
+        FROM games WHERE uuid = 'game-1'
+        """
+    )
+    connection.executemany(
+        """
+        INSERT INTO game_participants(
+            game_uuid, color, player_id, rating, result, rating_source
+        ) VALUES ('short-non-checkmate', ?, ?, 2000, ?, 'public')
+        """,
+        [("white", 1, "win"), ("black", 2, "resigned")],
+    )
+    connection.commit()
+    connection.close()
+
+    outcomes = list(CrawlerSnapshotAdapter(crawler_db).iter_outcomes())
+
+    accepted = [outcome.game.uuid for outcome in outcomes if outcome.game is not None]
+    skipped = [outcome.skip_reason for outcome in outcomes if outcome.skip_reason]
+    assert accepted == ["game-1"]
+    assert skipped == ["short_non_checkmate"]

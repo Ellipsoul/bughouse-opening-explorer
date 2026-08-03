@@ -21,18 +21,22 @@ Read these documents in this order when resuming work:
    — completed exact-prefix shape analysis, adapter and terminal policy,
    relational/packed/bitmap prototype evidence, selected packed-interval
    architecture, and the remaining streaming-writer gate.
-7. [`PLATFORM_ARCHITECTURE.md`](PLATFORM_ARCHITECTURE.md) — durable raw-to-index,
+7. [`OPENING_EXPLORER_VERTICAL_PROTOTYPE_2026-08-03.md`](OPENING_EXPLORER_VERTICAL_PROTOTYPE_2026-08-03.md)
+   — streaming-writer, compact metadata, memory-mapped service, adaptive
+   neighborhood, local Next.js page, benchmark evidence, and exact remaining
+   full-build/browser blockers.
+8. [`PLATFORM_ARCHITECTURE.md`](PLATFORM_ARCHITECTURE.md) — durable raw-to-index,
    API, publication, client-bandwidth, and failure-isolation architecture.
-8. [`PLATFORM_ROADMAP.md`](PLATFORM_ROADMAP.md) — measured opening-index,
+9. [`PLATFORM_ROADMAP.md`](PLATFORM_ROADMAP.md) — measured opening-index,
    read-API, prefetch, hosting, and deferred storage research plan.
-9. [`CRAWLER.md`](CRAWLER.md) — canonical crawler architecture and policy.
-10. [`CRAWL_RUN_FULL_ANALYSIS.md`](CRAWL_RUN_FULL_ANALYSIS.md) — final closure,
+10. [`CRAWLER.md`](CRAWLER.md) — canonical crawler architecture and policy.
+11. [`CRAWL_RUN_FULL_ANALYSIS.md`](CRAWL_RUN_FULL_ANALYSIS.md) — final closure,
    database integrity, game-shape audit, move coverage, and bounded anomalies.
-11. [`QUALIFICATION_CORRECTION_IMPACT_2026-08-01.md`](QUALIFICATION_CORRECTION_IMPACT_2026-08-01.md)
+12. [`QUALIFICATION_CORRECTION_IMPACT_2026-08-01.md`](QUALIFICATION_CORRECTION_IMPACT_2026-08-01.md)
    — per-player read-only impact evidence and the bounded reconciliation plan.
-12. [`CRAWL_RUN_250_ANALYSIS.md`](CRAWL_RUN_250_ANALYSIS.md) — historical checkpoint
+13. [`CRAWL_RUN_250_ANALYSIS.md`](CRAWL_RUN_250_ANALYSIS.md) — historical checkpoint
    completion, reconciliation findings, and the pre-full-crawl baseline.
-13. [`CRAWL_RUN_100_ANALYSIS.md`](CRAWL_RUN_100_ANALYSIS.md) — historical
+14. [`CRAWL_RUN_100_ANALYSIS.md`](CRAWL_RUN_100_ANALYSIS.md) — historical
    measurements and the evidence that led to sampler version 2. Treat its
    point-in-time queue tables as historical rather than current status.
 

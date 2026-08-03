@@ -16,3 +16,6 @@ frontend/dist/
 *.db-shm
 *.db-journal
 *.db.zst
+
+# Versioned derived opening artifacts and local benchmark evidence
+artifacts/

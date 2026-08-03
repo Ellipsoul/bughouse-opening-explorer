@@ -10,11 +10,13 @@ from bughouse_explorer.tcn import decode_tcn
 STANDARD_INITIAL_SETUP = (
     "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 )
+ADAPTER_POLICY_VERSION = "opening-adapter-v2-short-non-checkmate"
 
 
 @dataclass(frozen=True)
 class InclusionPolicy:
     max_plies: int = 2_048
+    max_short_non_checkmate_plies: int = 6
     accepted_sources: frozenset[str] = frozenset({"public", "callback"})
 
 
@@ -166,4 +168,10 @@ class CrawlerSnapshotAdapter:
             decode_tcn(tcn)
         except (IndexError, ValueError):
             return "decode_error"
+        if (
+            len(tcn) // 2 <= self.policy.max_short_non_checkmate_plies
+            and row["white_result"] != "checkmated"
+            and row["black_result"] != "checkmated"
+        ):
+            return "short_non_checkmate"
         return None

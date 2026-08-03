@@ -10,6 +10,7 @@ import struct
 import sys
 import zlib
 
+from .adapter import ADAPTER_POLICY_VERSION
 from .model import Branch, NodeView, PrefixNotFound, QueryFilter, replay_prefix
 from .trie import prepare_trie
 
@@ -150,8 +151,9 @@ def build_packed_index(
         "postings.json",
     ]
     manifest = {
-        "adapter_policy": "opening-adapter-v1",
+        "adapter_policy": ADAPTER_POLICY_VERSION,
         "build_id": prepared.build_id,
+        "dataset_version": prepared.build_id,
         "edge_record_bytes": EDGE.size,
         "edges": len(edges),
         "files": {
@@ -162,6 +164,7 @@ def build_packed_index(
             for name in files
         },
         "games": len(prepared.games),
+        "format_version": "packed-prefix-interval-v1",
         "node_record_bytes": NODE.size,
         "node_semantics": "exact-decoded-move-prefix-v1",
         "nodes": len(prepared.nodes),
@@ -181,6 +184,11 @@ class PackedIndex:
         self.directory = Path(directory)
         self.manifest = json.loads((self.directory / "manifest.json").read_text())
         self.posting_index = json.loads((self.directory / "postings.json").read_text())
+        self._game_data_name = (
+            "games.bin"
+            if self.manifest.get("game_metadata_codec") == "zlib-json-v1"
+            else "games.jsonl"
+        )
         self._streams = []
         self._maps = {}
         for name in (
@@ -188,7 +196,7 @@ class PackedIndex:
             "edges.bin",
             "endings.bin",
             "game_offsets.bin",
-            "games.jsonl",
+            self._game_data_name,
             "postings.bin",
         ):
             stream = (self.directory / name).open("rb")
@@ -322,7 +330,10 @@ class PackedIndex:
         offsets = self._maps["game_offsets.bin"]
         start = UINT64.unpack_from(offsets, ordinal * UINT64.size)[0]
         end = UINT64.unpack_from(offsets, (ordinal + 1) * UINT64.size)[0]
-        return json.loads(self._maps["games.jsonl"][start:end])
+        payload = self._maps[self._game_data_name][start:end]
+        if self.manifest.get("game_metadata_codec") == "zlib-json-v1":
+            payload = zlib.decompress(payload)
+        return json.loads(payload)
 
     def query(self, prefix=(), query_filter: QueryFilter | None = None):
         prefix = tuple(prefix)

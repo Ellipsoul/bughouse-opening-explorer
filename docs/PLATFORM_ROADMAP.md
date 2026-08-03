@@ -315,8 +315,9 @@ client navigation state.
 3. **Fetch panels concurrently.** Moves and representative games can start
    together, while moves retain render priority.
 4. **Prefetch a budgeted neighborhood.** Always return the current node and
-   every immediate child, then expand high-support descendants toward a target
-   depth (initially five) only while hard node and encoded-byte budgets permit.
+   every immediate child, then expand a high-support descendant's complete
+   immediate move list as one atomic group toward a target depth (initially
+   five) only while hard node and encoded-byte budgets permit.
    Depth alone is unsafe: the revised trie contains about 97,057 nodes from the
    root through ply five. Return flat node/edge records plus explicit frontier
    ids rather than an unbounded recursive tree.
@@ -325,9 +326,10 @@ client navigation state.
    overwriting a later one.
 6. **Cache and refill by frontier.** Merge immutable structural records by
    `(dataset_version, node_id)` and cache filtered overlays by normalized filter
-   tuple. Visited backward moves should be local. Refill when the selected child
-   is absent or idle prefetch approaches a frontier; deduplicate overlapping
-   requests and record unused evicted prefetch.
+   tuple. Pin the visited path and its cached immediate move lists so backward
+   moves are complete and local. Refill when the selected child is absent or
+   idle prefetch approaches a frontier; deduplicate overlapping requests and
+   record unused evicted prefetch.
 7. **Exploit immutable dataset versions.** Serve a read-only snapshot with a
    version id and strong ETags. CDN/browser caching can then retain popular
    node responses safely until a new index snapshot is published.
@@ -401,3 +403,39 @@ in the full local artifact only after the streaming-writer gates pass.
 Preserve the AGPL attribution and corresponding-source obligations when the
 modified explorer is made available over a network. Keep the README's link to
 the original Oh-My-Lands work and retain Git history.
+
+## 3 August 2026 vertical-slice checkpoint
+
+Workstream C's representation and bounded-memory implementation are now
+demonstrated on repeated 91,911- and 186,009-game inputs. The packed v2 writer
+projects about 2.58 GB at full scale and stayed below 72 MB observed peak RSS.
+Compact per-game records reduced total representative bytes by about 26%.
+Deterministic hashes, validation, immutable versioning, publication, rollback,
+short-checkmate retention, internal endings, exact prefixes, and sorted seat
+postings remain intact.
+
+Workstream D's local service and comparison are implemented. The measured
+adaptive default is 500 nodes rather than the initial 2,000-node hypothesis;
+the 256 KiB default byte target and 4,000-node/512 KiB hard caps remain.
+Representative root P99 stayed below 10 ms. Adaptive depth five used two
+requests on the popular trace, versus seven per-move requests, while using
+about half the bytes of fixed depth five. A corrected browser-policy simulation
+that requires complete move lists measured those as two foreground requests
+and zero idle refills; the earlier edge-presence-only comparison was
+insufficient to detect partial visited branches.
+
+Workstream E's local Next.js route, accessible sidebar link, one-board replay,
+filters, bounded LRU, frontier refill, lazy games, and instrumentation are
+implemented behind a production-disabled local flag. It remains a separate
+page and did not change the two-board viewer.
+
+The next gates, in order, are:
+
+1. obtain a credible physical-write measurement for the streaming build;
+2. complete the remaining real-browser filter, back-forward, and stale-request
+   cancellation matrix now that loopback bootstrap and cached navigation pass;
+3. only then decide whether the full checked local artifact is authorized; and
+4. defer hosted API/CDN/authentication decisions until full-local query and UX
+   evidence exists.
+
+No full build or deployment occurred at this checkpoint.

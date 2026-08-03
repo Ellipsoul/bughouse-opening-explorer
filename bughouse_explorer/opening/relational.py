@@ -7,6 +7,7 @@ from pathlib import Path
 import sqlite3
 
 from .model import Branch, NodeView, PrefixNotFound, QueryFilter, replay_prefix
+from .adapter import ADAPTER_POLICY_VERSION
 from .trie import prepare_trie
 
 
@@ -158,7 +159,7 @@ def build_relational_index(games, path, *, source_fingerprint: str):
             ),
         )
         metadata = {
-            "adapter_policy": "opening-adapter-v1",
+            "adapter_policy": ADAPTER_POLICY_VERSION,
             "build_id": prepared.build_id,
             "games": len(prepared.games),
             "node_semantics": "exact-decoded-move-prefix-v1",
