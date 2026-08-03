@@ -12,10 +12,10 @@ details without collapsing these ownership boundaries.
 flowchart TD
     raw["crawler.db<br/>lossless raw truth"]
     build["Deterministic adapter and index builder<br/>policy + provenance + TCN replay"]
-    index["Versioned opening-index SQLite snapshot<br/>rebuildable and read-optimized"]
-    api["Read-only FastAPI service<br/>bounded versioned JSON API"]
+    index["Versioned immutable opening-index snapshot<br/>packed prefix intervals selected; SQLite baseline"]
+    api["Local or hosted read-only service<br/>memory-mapped packed artifact"]
     cache["HTTP/CDN and server cache<br/>keyed by dataset version"]
-    client["bughouse-chess Next.js interface<br/>fetch branches on demand"]
+    client["bughouse-chess Next.js interface<br/>budgeted neighborhood prefetch + client cache"]
 
     raw --> build
     build --> index
@@ -29,16 +29,20 @@ In compact form:
 ```text
 crawler.db (lossless raw truth)
         ↓
-versioned derived opening-index SQLite snapshot
+versioned immutable derived opening-index snapshot
         ↓
-read-only FastAPI/read service
+read-only bounded read service
         ↓
 bughouse-chess Next.js interface
 ```
 
-The browser never receives either SQLite database. It receives small,
-cacheable responses for the position and branch the user is currently
-exploring.
+The browser never receives either SQLite database or the complete packed
+artifact. It receives bounded, cacheable node neighborhoods and game details
+for the move-prefix region the user is currently exploring. The first product
+experiment runs the same boundary locally: a localhost service memory-maps a
+representative packed artifact and the local Next.js client queries it. A later
+hosted service can replace the localhost origin without replacing the client
+navigation model.
 
 ## Design principles
 
@@ -81,9 +85,12 @@ clients must never observe a partially rebuilt tree.
 
 ### Bounded client work
 
-The client asks for only the current position, its immediate continuations,
-and a small number of representative games. It does not download the tree, a
-username corpus, raw payloads, or unbounded fact rows.
+The client asks for the current position, all immediate continuations, and a
+bounded forward neighborhood. It caches immutable nodes by dataset version so
+visited backward navigation requires no new request. Deeper prefetch targets a
+small number of moves but is constrained by hard node and encoded-byte budgets,
+not depth alone. It does not download the tree, a username corpus, raw payloads,
+or unbounded fact rows.
 
 ## Layer 1 — crawler database
 
@@ -166,6 +173,19 @@ because filters and example lookups require membership. The prefix-interval
 candidate may avoid that row-per-node-per-game shape. Both expectations must be
 measured rather than used as hosting forecasts.
 
+The representative slice is now complete; see
+[`OPENING_TREE_ARCHITECTURE_PROTOTYPE_2026-08-03.md`](OPENING_TREE_ARCHITECTURE_PROTOTYPE_2026-08-03.md).
+It selected the prefix-interval packed trie with sorted ordinal postings and
+retained SQLite as the oracle/baseline. The full corpus contains 11,626,980
+logical nodes before the short-line policy refinement. The revised production
+policy excludes non-checkmate games of six plies or fewer, retains 431 genuine
+short checkmates, and contains 6,516,478 games, 11,625,223 logical nodes, and
+96,570,295 relational membership entries. The revised projection is about 3.23
+GiB packed versus 5.38 GiB SQLite. Dense zlib bitmap postings were rejected. A
+streaming artifact writer remains mandatory before any full build because the
+representative in-memory builders do not meet the production RAM target when
+extrapolated.
+
 ### Node identity
 
 The first product is a move-prefix trie. A node is the exact decoded move
@@ -197,10 +217,32 @@ outcome, never an ordinary terminal.
 
 ## Layer 3 — read-only API
 
-FastAPI remains a suitable reference service because the existing server
-already models position, move, game, metadata, and username queries. The
-production contract should be versioned independently from internal table
-names.
+FastAPI remains a possible reference service because the existing server
+already models position, move, game, metadata, and username queries. Neither
+FastAPI nor another framework is selected by the storage slice. The production
+contract should be versioned independently from internal records and fixed
+only after the streaming writer and read-service benchmark.
+
+### Local memory-mapped experiment
+
+The next product slice is a local vertical prototype, not an internet
+deployment. A thin read-only service opens a representative packed artifact
+with memory mapping and exposes the same bounded query boundary that a later
+hosted service would use. Mapping the files makes the complete artifact
+addressable without parsing it into Python objects or loading it into browser
+JavaScript memory; the operating system pages touched regions into RAM.
+
+The revised 3.23 GiB projection is dominated by approximately 2.62 GiB of
+prototype JSON-lines game metadata. Nodes and edges together are about 466 MiB,
+while postings, offsets, and directories add roughly 153 MiB. Navigation should
+therefore read node/edge/posting records eagerly as needed and load bounded game
+metadata only when a terminal or example-game panel requests it. The streaming
+writer should replace the verbose metadata representation before freezing the
+full format.
+
+The local service and client are experimental contracts. They must remain
+versioned and independently testable, but they may change in response to the
+prefetch and UX benchmarks. The framework is still not architectural.
 
 ### Candidate endpoints
 
@@ -208,6 +250,10 @@ names.
   policy version, and freshness watermark.
 - `GET /api/nodes/{node_id}/moves` — bounded continuations with child
   ids, move notation, aggregate results, and optional lightweight filter data.
+- `GET /api/nodes/{node_id}/neighborhood` — the anchor, every immediate child,
+  and a deeper forward subset selected under explicit depth, node, and encoded-
+  byte budgets; return flat node/edge records plus frontier ids rather than an
+  unbounded recursive object.
 - `GET /api/nodes/{node_id}/games` — a strictly limited set of
   representative games.
 - optional FEN lookup must acknowledge that several move prefixes can display
@@ -218,13 +264,46 @@ names.
 Exact response fields and limits should be fixed after the representative
 benchmark. Every response should carry or be keyed by the dataset version.
 
+### Budgeted neighborhood semantics
+
+Depth is a target, not permission to return the complete radius. In the revised
+full shape, the root through ply five contains approximately 97,057 nodes. A
+literal depth-five subtree would therefore be an unsuitable default response,
+especially after JSON encoding and filter aggregates.
+
+A neighborhood query should:
+
+1. always include the anchor and all of its immediate children;
+2. expand deeper continuations in descending support order, or another measured
+   deterministic priority, until the target depth is met or a hard node/byte
+   budget is exhausted;
+3. return a flat collection keyed by node id so overlapping responses merge
+   into the client cache without duplication;
+4. identify every truncated boundary as a frontier with `has_more` or equivalent
+   state;
+5. include parent/path information sufficient for a deep link to reconstruct
+   breadcrumbs without fetching siblings;
+6. bind filtered aggregates to the normalized filter tuple while allowing
+   immutable structural node/edge data to be cached independently if that split
+   measures better; and
+7. reject an unknown dataset version or node id rather than mixing versions.
+
+The prototype should start with a target depth of five but conservative default
+budgets, then compare per-move fetches, fixed depths, and the adaptive budgeted
+strategy on deterministic navigation traces. A server-side traversal can follow
+the packed child ranges directly; serialization size and branching, rather than
+individual memory-mapped record lookup, are expected to set the useful limit and
+must be measured.
+
 ### Query and cache behavior
 
 - serve default move counts from precomputed aggregates;
 - keep arbitrary filters bounded and indexed;
 - use strong ETags or immutable versioned URLs;
-- cache by dataset version, position id, and normalized filter tuple;
+- cache by dataset version, node id, and normalized filter tuple;
 - cap example games and encoded response bytes;
+- deduplicate overlapping neighborhood requests and expose truncation/frontier
+  counts for client instrumentation;
 - measure P50/P95/P99 latency, rows scanned, CPU, cache hit rate, and response
   bytes; and
 - reject unbounded branch depth, node count, or fact export.
@@ -241,27 +320,37 @@ is behavioral reference material, not a second production application.
 
 ### Bandwidth and interaction rules
 
-1. Fetch the current position's moves and representative games concurrently,
-   while allowing moves to render first.
-2. Prefetch only the top few likely child positions, initially one level deep;
-   measure before changing that limit.
-3. Never recursively prefetch the tree. Branching makes request and byte growth
-   exponential.
-4. Use `AbortController` or a navigation generation id so stale responses
+1. Fetch a bounded node neighborhood and representative games independently,
+   while allowing the board and immediate moves to render first.
+2. Cache flat structural records by `(dataset_version, node_id)` and filtered
+   overlays by the normalized filter tuple. Retain visited nodes in a bounded
+   LRU so ordinary backward navigation is local and instant.
+3. Treat depth five as a prefetch target, never an unconditional radius. Always
+   fetch immediate moves, then expand high-support descendants only while the
+   node and byte budgets permit.
+4. Mark truncated nodes as frontiers. Refill when the selected continuation is
+   absent from cache or when idle prefetch reaches a configured frontier
+   threshold; do not wait until the user is already blocked if the next likely
+   request can be issued safely in the background.
+5. Deduplicate overlapping in-flight neighborhoods and merge responses by node
+   id. Do not recursively produce unbounded requests or responses.
+6. Use `AbortController` or a navigation generation id so stale responses
    cannot overwrite a newer position.
-5. Cache by dataset version and filter tuple so publication invalidates old
+7. Cache by dataset version and filter tuple so publication invalidates old
    data without manual cache surgery.
-6. Lazy-load player search and use prefix results rather than shipping hundreds
+8. Lazy-load player search and use prefix results rather than shipping hundreds
    of thousands of usernames.
-7. Set explicit response and example-game limits, then record actual compressed
-   bytes during browser benchmarks.
-8. Keep raw source JSON and crawl administration entirely outside browser
-   reach.
+9. Set explicit node, depth, response-byte, and example-game limits, then record
+   request count, cache-hit navigation, and actual compressed bytes during
+   browser benchmarks.
+10. Keep raw source JSON and crawl administration entirely outside browser
+    reach.
 
-A bounded branch endpoint may eventually return the current position plus a
-small number of top-child summaries. It must have hard node, depth, and byte
-limits and should be compared with ordinary HTTP/2 parallel requests before it
-is adopted.
+A bounded neighborhood endpoint is the leading experiment, not yet a frozen
+production contract. Compare it with one-request-per-move and narrow parallel
+requests. The client should instrument how many moves are served entirely from
+cache, how often frontiers block interaction, and how much unused prefetched
+data is evicted.
 
 ## Publication lifecycle
 
@@ -293,23 +382,35 @@ operation; it does not write back into the crawler database.
 
 ## Immediate sequence
 
-1. Use the completed retained-application exploration as behavioral evidence,
-   not a production schema constraint.
-2. Apply the settled move-prefix-trie semantics: exact move sequence is node
-   identity, transpositions do not merge, and drops remain navigable edges.
-3. Define inclusion/provenance, global and filtered terminal semantics, and a
-   format-neutral crawler-adapter contract.
-4. Prototype and fairly benchmark a compact relational baseline and at least
-   one prefix-interval packed-trie/bitmap or embedded-key/value alternative
-   against a checked snapshot, including adaptive support-one termination.
-5. Select and document the simplest architecture that clears explicit capacity,
-   rebuild, correctness, latency, and operational targets with headroom.
-6. Freeze the first versioned API contract from measured query shapes, including
-   efficient player-plus-colour filtering.
-7. Verify the chosen read service against the immutable derived version;
-   FastAPI remains an option rather than a requirement.
-8. Integrate branch-on-demand exploration into `bughouse-chess` and measure
-   browser latency and transferred bytes.
+1. Implement the revised adapter policy with a counted
+   `short_non_checkmate` outcome while retaining short checkmates; preserve the
+   completed exact-prefix semantics, packed-format selection, SQLite oracle,
+   and benchmark corpus documented on 3 August 2026.
+2. Replace the representative in-memory build path with an external-sort,
+   streaming packed writer, improve the verbose metadata component, and repeat
+   the 100k then larger representative benchmarks under the 4 GiB RAM and 5 GiB
+   projected-artifact gates.
+3. Build a thin local memory-mapped read service over the representative packed
+   artifact. Prototype the bounded neighborhood query with target depth five,
+   hard node/byte budgets, deterministic expansion, and explicit frontiers.
+4. Add a local-only explorer route in `bughouse-chess`. Cache versioned flat
+   nodes, make backward navigation local, refill approaching frontiers, cancel
+   stale requests, and keep game metadata lazy.
+5. Compare one-request-per-move, fixed-depth, and adaptive budgeted prefetch on
+   root, popular-line, deep, backtracking, and filtered navigation traces.
+   Measure service latency, response bytes, request count, cache hit rate,
+   blocked clicks, unused prefetch, and client render latency before freezing
+   the contract.
+6. Measure reliable physical writes and temporary space, deterministic rebuild,
+   correction, validation, atomic publication, and rollback for the streaming
+   writer. Build the full corpus only after all representative gates pass; keep
+   the checked raw snapshot immutable and retain the previous derived version.
+7. Swap the full local artifact into the same service and use it for UX
+   iteration. Freeze the first hosted API contract only after the local query
+   and prefetch evidence is complete.
+8. In a later hosting slice, deploy the read boundary, add versioned HTTP/CDN
+   caching, and preserve atomic publication/rollback without changing the
+   frontend navigation model.
 9. Add a repeatable monthly snapshot/build/validate/publish workflow.
 
 Live raw-database compression is deliberately absent from this sequence. It

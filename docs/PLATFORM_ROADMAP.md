@@ -258,10 +258,19 @@ are reference evidence, not forecasts for the much larger crawler corpus.
 8. Measure correction handling, deterministic rebuild, atomic publication, and
    rollback before designing the monthly production build.
 
-`game_facts` remains the dominant size-risk hypothesis for the relational
-baseline. The prefix-interval candidate may replace repeated per-node facts with
-node ordinal ranges and seat-specific postings. Neither shape is accepted until
-the representative comparison measures it.
+The representative comparison is complete. The selected format is the packed
+prefix-interval trie with sorted White/Black ordinal postings; compact SQLite is
+retained as the oracle and operational baseline, and dense compressed bitmaps
+were rejected. The revised production policy excludes non-checkmate games of
+six plies or fewer while retaining 431 short checkmates. It yields 6,516,478
+games, 11,625,223 nodes, and 96,570,295 relational memberships, with projections
+of about 3.23 GiB packed and 5.38 GiB SQLite. See
+`OPENING_TREE_ARCHITECTURE_PROTOTYPE_2026-08-03.md` for the evidence.
+
+The remaining Workstream C gate is implementation, not representation choice:
+add the revised policy to the adapter, replace the object-retaining prototype
+with a streaming/external-sort writer, compact the metadata component, and
+repeat representative capacity/publication benchmarks before any full build.
 
 ## Workstream D — read API, latency, and bandwidth
 
@@ -287,28 +296,38 @@ currently waits for `/api/moves`, renders the board/continuations, then awaits
 `/api/games`. It does not prefetch child branches, and rapid navigation has no
 request cancellation or stale-render guard.
 
+The next experiment keeps the browser/database boundary but changes both sides
+behind it. A localhost read service memory-maps the selected packed artifact,
+and a local-only `bughouse-chess` route queries that service. The browser must
+not load the complete artifact into JavaScript memory. Once measured locally,
+the same query boundary can move to a hosted read service without rewriting the
+client navigation state.
+
 ### Scaling strategy to test
 
 1. **Keep navigation keyed by compact trie-node ids.** Return child ids and
    enough move/path data to replay the displayed board. FEN is a projection,
    not node identity.
-2. **Materialize the overwhelmingly common paths.** Preserve `move_agg` for the
-   default view. Consider a small number of product-defined rating buckets if
-   arbitrary rating thresholds make live aggregation too costly; measure before
-   multiplying aggregates.
+2. **Use packed interval support and result postings for common paths.** Avoid
+   reconstructing default branch counts from game metadata. Consider a small
+   number of product-defined rating buckets only if arbitrary rating thresholds
+   prove too costly; measure before multiplying aggregates.
 3. **Fetch panels concurrently.** Moves and representative games can start
    together, while moves retain render priority.
-4. **Prefetch narrowly.** After rendering a node, prefetch continuations for
-   only the top `K` likely child moves, initially `K=2` or `3` and depth one.
-   Cache by `(dataset_version, node_id, rating/filter tuple)`. Do not
-   recursively prefetch the tree: branching causes exponential request and
-   bandwidth growth.
+4. **Prefetch a budgeted neighborhood.** Always return the current node and
+   every immediate child, then expand high-support descendants toward a target
+   depth (initially five) only while hard node and encoded-byte budgets permit.
+   Depth alone is unsafe: the revised trie contains about 97,057 nodes from the
+   root through ply five. Return flat node/edge records plus explicit frontier
+   ids rather than an unbounded recursive tree.
 5. **Use cancellation and stale-response protection.** An `AbortController` or
    navigation generation id should prevent a slow prior node from
    overwriting a later one.
-6. **Consider a bounded branch endpoint.** One API call could return the current
-   node plus top-child summaries, but it must enforce maximum nodes, depth,
-   and encoded bytes. Compare it with ordinary HTTP/2 parallel keyed requests.
+6. **Cache and refill by frontier.** Merge immutable structural records by
+   `(dataset_version, node_id)` and cache filtered overlays by normalized filter
+   tuple. Visited backward moves should be local. Refill when the selected child
+   is absent or idle prefetch approaches a frontier; deduplicate overlapping
+   requests and record unused evicted prefetch.
 7. **Exploit immutable dataset versions.** Serve a read-only snapshot with a
    version id and strong ETags. CDN/browser caching can then retain popular
    node responses safely until a new index snapshot is published.
@@ -323,6 +342,11 @@ request cancellation or stale-render guard.
     is a versioned read API over a read-only derived database. Crawl mutation
     remains operator-only.
 
+The leading neighborhood endpoint is an experimental contract. Start with
+conservative candidate limits such as target depth five, 2,000 default nodes,
+a 4,000-node hard cap, 256 KiB default encoded bytes, and a 512 KiB hard cap.
+Measure and revise them rather than treating them as production guarantees.
+
 ### Benchmark matrix
 
 Measure cold and warm latency for:
@@ -333,16 +357,22 @@ Measure cold and warm latency for:
 - FEN lookup;
 - username prefix search;
 - one-position versus bounded-branch responses;
+- one-request-per-move, fixed-depth one/three/five, and adaptive budgeted
+  neighborhood responses;
+- popular forward navigation, branch-and-backtrack, cache-warm reverse
+  navigation, deep links, and filter changes;
 - one, several, and many concurrent readers.
 
 Record P50/P95/P99 server latency, rows scanned, database CPU, cache hit rate,
-response bytes before/after HTTP compression, and client navigation time. Set
-service-level targets only after the representative derived index exists.
+response bytes before/after HTTP compression, requests per move, blocked clicks,
+unused prefetched nodes, and client navigation/render time. The local prototype
+should report cached versus network-backed interactions separately. Set final
+service-level targets only after the representative packed service exists.
 
-SQLite may be entirely adequate for a single read host using immutable
-snapshots, indexes, WAL/read-only connections, multiple API workers, and an
-HTTP cache. Reconsider PostgreSQL or a distributed store only if measurements
-show a concurrency, update, or operational limit that those techniques cannot
+The packed artifact is selected for the first read-service experiment; SQLite
+remains its correctness and operational fallback. Reconsider PostgreSQL or a
+distributed store only if measured hosted concurrency or publication behavior
+exposes a requirement that an immutable packed reader plus HTTP cache cannot
 meet.
 
 ## Workstream E — publication and `bughouse-chess`
@@ -351,16 +381,22 @@ Publish derived index versions atomically: build and validate a new snapshot,
 then switch the API to it and invalidate/version caches. Never expose a
 partially rebuilt opening tree.
 
-The API must return bounded branch data rather than a database or full tree.
-Measure response bytes, cancellation, top-child prefetch, and cache behavior as
-part of the product slice; do not treat database compression as a substitute
-for bandwidth-aware API design.
+The API must return bounded neighborhood data rather than a database or full
+tree. Prototype this first against a local memory-mapped artifact. Measure
+response bytes, cancellation, frontier refill, request deduplication, cached
+backtracking, and unused prefetch as part of the product slice; do not treat
+database compression as a substitute for bandwidth-aware API design.
 
 The final interface belongs in the existing `bughouse-chess` Next.js
 application. Adapt the future API to its `ChessGame`, `MatchGame`, numeric game
 id, UUID partner id, and player models. Reuse its board and replay components
 where appropriate. The frozen Vite frontend is a behavior/reference source,
 not the intended second production application.
+
+The local prototype should be configuration-gated and point to localhost. It is
+not a production deployment and should not require the full corpus: begin with
+the deterministic representative artifact, validate prefetch behavior, and swap
+in the full local artifact only after the streaming-writer gates pass.
 
 Preserve the AGPL attribution and corresponding-source obligations when the
 modified explorer is made available over a network. Keep the README's link to
