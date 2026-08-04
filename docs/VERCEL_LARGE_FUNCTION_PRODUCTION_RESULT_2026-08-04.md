@@ -15,7 +15,7 @@ served, modified, or used.
 | Boundary | Active deployment | Runtime |
 | --- | --- | --- |
 | opening service | `dpl_5EwbtsRxMLMcUoVNZksJQAC5A6ns` | Python 3.12, 2,048 MB, 300 s, `iad1` |
-| frontend | `dpl_9KkUweLLKcgRDk6vMfmfsGihaRiZ` | Node.js 22, 1,024 MB, 60 s proxy, `iad1` |
+| frontend | `dpl_6ceeSivzY9Smx6mk1ohdqLNUu3Xo` | Node.js 22, 1,024 MB, 60 s proxy, `iad1` |
 | public frontend | `https://bughouse.aronteh.com` | full dataset through `/api/opening-explorer/*` |
 | service alias | `https://bughouse-opening-explorer-service.vercel.app` | server-only bearer boundary |
 | retained rollback | `dpl_EFQgMysFNBRqQRqZctoMYtp8Pvar` | representative dataset |
