@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import sqlite3
 import tempfile
+import time
 
 from .packed import EDGE, NODE, _file_hash
 
@@ -49,18 +50,48 @@ def _validate_relational(path):
     return PublishedVersion(path.resolve(), metadata["build_id"], "sqlite")
 
 
-def validate_artifact(path):
+def _validate_artifact(path, phases=None):
     path = Path(path)
     if path.is_file():
         return _validate_relational(path)
     if path.is_dir() and (path / "manifest.json").is_file():
+        started = time.perf_counter_ns()
         manifest = json.loads((path / "manifest.json").read_text())
+        if phases is not None:
+            phases["manifest_parse"] = {
+                "bytes": (path / "manifest.json").stat().st_size,
+                "scaling": "constant",
+                "wall_ms": (time.perf_counter_ns() - started) / 1_000_000,
+            }
+
+        started = time.perf_counter_ns()
+        candidates = {}
         for name, expected in manifest["files"].items():
             candidate = path / name
             if candidate.stat().st_size != expected["bytes"]:
                 raise ValueError(f"packed size mismatch: {name}")
+            candidates[name] = candidate
+        if phases is not None:
+            phases["component_stat"] = {
+                "files": len(candidates),
+                "scaling": "file_count",
+                "wall_ms": (time.perf_counter_ns() - started) / 1_000_000,
+            }
+
+        started = time.perf_counter_ns()
+        for name, expected in manifest["files"].items():
+            candidate = candidates[name]
             if _file_hash(candidate) != expected["sha256"]:
                 raise ValueError(f"packed hash mismatch: {name}")
+        if phases is not None:
+            phases["component_checksum"] = {
+                "bytes": sum(record["bytes"] for record in manifest["files"].values()),
+                "files": len(candidates),
+                "scaling": "artifact_bytes",
+                "wall_ms": (time.perf_counter_ns() - started) / 1_000_000,
+            }
+
+        started = time.perf_counter_ns()
         if (path / "nodes.bin").stat().st_size != manifest["nodes"] * NODE.size:
             raise ValueError("packed node record size mismatch")
         if (path / "edges.bin").stat().st_size != manifest["edges"] * EDGE.size:
@@ -103,10 +134,28 @@ def validate_artifact(path):
                 if edge_bytes is not None:
                     edge_bytes.close()
                 node_bytes.close()
+        if phases is not None:
+            phases["structural_validation"] = {
+                "edges": manifest["edges"],
+                "nodes": manifest["nodes"],
+                "scaling": "node_and_edge_records",
+                "wall_ms": (time.perf_counter_ns() - started) / 1_000_000,
+            }
         return PublishedVersion(
             path.resolve(), manifest["build_id"], f"packed-{manifest['postings']}"
         )
     raise ValueError(f"unsupported index artifact: {path}")
+
+
+def validate_artifact(path):
+    return _validate_artifact(path)
+
+
+def validate_artifact_profiled(path):
+    """Validate a packed artifact and return low-cardinality phase metrics."""
+    phases = {}
+    version = _validate_artifact(path, phases)
+    return version, phases
 
 
 def publish_version(artifact, pointer):
@@ -151,3 +200,18 @@ def current_version(pointer):
         build_id=payload["build_id"],
         format=payload["format"],
     )
+
+
+def remove_version(pointer):
+    """Remove only the active publication pointer, retaining every artifact."""
+    pointer = Path(pointer)
+    try:
+        pointer.unlink()
+    except FileNotFoundError:
+        return False
+    directory_fd = os.open(pointer.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+    return True

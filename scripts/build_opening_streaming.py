@@ -15,6 +15,7 @@ from bughouse_explorer.opening.adapter import (
     SnapshotSelection,
 )
 from bughouse_explorer.opening.publication import validate_artifact
+from bughouse_explorer.opening.process_io import snapshot_process_io
 from bughouse_explorer.opening.streaming import build_streaming_packed_index
 
 
@@ -54,7 +55,7 @@ def main():
         f"{selection.rowid_remainder};policy={ADAPTER_POLICY_VERSION}"
     )
 
-    before_blocks = resource.getrusage(resource.RUSAGE_SELF).ru_oublock
+    io_before = snapshot_process_io()
     started = time.perf_counter()
     report = build_streaming_packed_index(
         CrawlerSnapshotAdapter(snapshot).iter_outcomes(selection),
@@ -66,9 +67,14 @@ def main():
     validation_started = time.perf_counter()
     validated = validate_artifact(args.output)
     validation_seconds = time.perf_counter() - validation_started
-    after_blocks = resource.getrusage(resource.RUSAGE_SELF).ru_oublock
+    io_after = snapshot_process_io()
     logical_write_bytes = report.temporary_bytes + report.final_bytes
-    physical_write_bytes = max(0, after_blocks - before_blocks) * 512
+    physical_write_bytes = max(
+        0, io_after.physical_write_bytes - io_before.physical_write_bytes
+    )
+    process_logical_write_bytes = max(
+        0, io_after.logical_write_bytes - io_before.logical_write_bytes
+    )
     manifest = json.loads((args.output / "manifest.json").read_text())
     usage = resource.getrusage(resource.RUSAGE_SELF)
     payload = {
@@ -83,9 +89,17 @@ def main():
         },
         "games_per_second": report.accepted_games / build_seconds,
         "logical_write_lower_bound_bytes": logical_write_bytes,
+        "process_logical_write_bytes": process_logical_write_bytes,
+        "process_logical_write_amplification": (
+            process_logical_write_bytes / report.final_bytes
+        ),
         "peak_rss_bytes": usage.ru_maxrss,
         "physical_write_bytes": physical_write_bytes,
-        "physical_write_measurement_reliable": physical_write_bytes > 0,
+        "physical_write_amplification": physical_write_bytes / report.final_bytes,
+        "physical_write_measurement": io_after.method,
+        "physical_write_measurement_reliable": (
+            io_before.reliable and io_after.reliable and physical_write_bytes > 0
+        ),
         "projected_full_final_bytes": round(
             report.final_bytes * PRODUCTION_POLICY_GAMES / report.accepted_games
         ),
@@ -97,8 +111,8 @@ def main():
         "validated_build_id": validated.build_id,
         "validation_seconds": validation_seconds,
         "write_measurement_note": (
-            "ru_oublock * 512 is reported only when nonzero; logical temporary plus "
-            "final bytes remain a lower bound, not a claim about physical amplification"
+            "Per-process physical and logical counters bracket build plus validation; "
+            "temporary plus final bytes remain a filesystem-footprint lower bound."
         ),
     }
     encoded = json.dumps(payload, indent=2, sort_keys=True) + "\n"

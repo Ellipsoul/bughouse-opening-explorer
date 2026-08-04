@@ -2,6 +2,11 @@
 
 Read these documents in this order when resuming work:
 
+Start with [`FULL_OPENING_TREE_SCALE_UP_RESULT_2026-08-04.md`](FULL_OPENING_TREE_SCALE_UP_RESULT_2026-08-04.md)
+for the current full-build, first-load, browser, lifecycle, and hosting decision.
+It is the latest state; the numbered history below supplies the underlying
+contracts and earlier evidence.
+
 1. [`HANDOFF_2026-08-01.md`](HANDOFF_2026-08-01.md) — current state, stable
    decisions, operational boundaries, and the next-session entrypoint.
 2. [`BACKUP_RECOVERY.md`](BACKUP_RECOVERY.md) — recovery contract, checked
@@ -30,9 +35,9 @@ Read these documents in this order when resuming work:
    representative artifact, provider/cost comparison, and measured HTTP/Cache
    Storage/IndexedDB persistence experiments.
 9. [`FULL_OPENING_TREE_SCALE_UP_PLAN_2026-08-03.md`](FULL_OPENING_TREE_SCALE_UP_PLAN_2026-08-03.md)
-   — current next-slice plan: first-load phase analysis, safe full local build,
-   representative-versus-full benchmarks, current hosting decision, and staged
-   production approval gates.
+   — completed local scale-up plan: first-load phase analysis, safe full local
+   build, representative-versus-full benchmarks, current hosting decision, and
+   the still-unapproved hosted-preview/production gates.
 10. [`FULL_OPENING_TREE_SCALE_UP_PROMPT.md`](FULL_OPENING_TREE_SCALE_UP_PROMPT.md)
    — copy-ready prompt for the next fresh session.
 11. [`HOSTING_PROVIDER_COMPARISON_2026-08-03.md`](HOSTING_PROVIDER_COMPARISON_2026-08-03.md)
@@ -63,5 +68,6 @@ Read these documents in this order when resuming work:
    measurements and the evidence that led to sampler version 2. Treat its
    point-in-time queue tables as historical rather than current status.
 
-The live crawler database is intentionally excluded from Git. Always query it
-for current counts instead of copying figures from a dated report.
+The live crawler database is intentionally excluded from Git. The full derived
+tree must be rebuilt only from an explicit restored, checksummed, SQLite-
+validated snapshot; never substitute `data/crawler.db` for the recorded input.

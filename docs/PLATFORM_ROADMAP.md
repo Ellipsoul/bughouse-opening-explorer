@@ -553,3 +553,27 @@ artifact and hosting decision or an evidence-backed blocker. It must never use
 `data/crawler.db` as a build input, contact Chess.com, expose the artifact or
 unbounded usernames to the browser, or weaken the settled node identity and
 bounded-query semantics.
+
+## 4 August 2026 full-scale checkpoint
+
+The preceding full-tree milestone is complete. The measured artifact has
+6,516,478 accepted games, 11,625,223 nodes, and 2,524,966,683 component bytes;
+the second build is component-identical. Startup, representative/full service
+and browser traces, filters, support-one/endings/drops, concurrency, correction,
+rollback, and pointer-only removal passed locally without changing budgets.
+
+The roadmap now has one immediate approval gate:
+
+1. with explicit permission, stage only one full immutable artifact in the
+   existing protected Vercel service project and run a preview Large Functions
+   trial;
+2. measure hosted package materialization, cold/warm readiness, P50/P95/P99,
+   RSS, 1/8/32/64 concurrency, errors, and usage against the local report;
+3. retain the representative deployment as rollback and keep Production
+   unchanged; and
+4. present the preview evidence and obtain a separate production approval.
+
+Object-storage range reading, an external container, and database projection
+remain conditional fallbacks. They are not warranted while the packed reader
+meets local semantics and budgets. See
+[`FULL_OPENING_TREE_SCALE_UP_RESULT_2026-08-04.md`](FULL_OPENING_TREE_SCALE_UP_RESULT_2026-08-04.md).

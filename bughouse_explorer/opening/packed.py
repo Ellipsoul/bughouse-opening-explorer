@@ -8,6 +8,7 @@ import mmap
 from pathlib import Path
 import struct
 import sys
+import time
 import zlib
 
 from .adapter import ADAPTER_POLICY_VERSION
@@ -19,6 +20,39 @@ NODE = struct.Struct("<iIIIIIIIi")
 EDGE = struct.Struct("<2sI")
 UINT32 = struct.Struct("<I")
 UINT64 = struct.Struct("<Q")
+
+
+class SortedPosting:
+    """Binary-searchable uint32 posting list backed by mapped bytes."""
+
+    def __init__(self, buffer, *, offset: int, count: int):
+        self.buffer = buffer
+        self.offset = offset
+        self.count = count
+
+    def _value(self, index):
+        return UINT32.unpack_from(
+            self.buffer, self.offset + index * UINT32.size
+        )[0]
+
+    def _lower_bound(self, value):
+        left = 0
+        right = self.count
+        while left < right:
+            middle = (left + right) // 2
+            if self._value(middle) < value:
+                left = middle + 1
+            else:
+                right = middle
+        return left
+
+    def count_between(self, start, end):
+        return self._lower_bound(end) - self._lower_bound(start)
+
+    def values_between(self, start, end):
+        left = self._lower_bound(start)
+        right = self._lower_bound(end)
+        return tuple(self._value(index) for index in range(left, right))
 
 
 def _file_hash(path):
@@ -183,7 +217,16 @@ class PackedIndex:
     def __init__(self, directory):
         self.directory = Path(directory)
         self.manifest = json.loads((self.directory / "manifest.json").read_text())
+        started = time.perf_counter_ns()
         self.posting_index = json.loads((self.directory / "postings.json").read_text())
+        self.startup_profile = {
+            "posting_directory_parse": {
+                "bytes": (self.directory / "postings.json").stat().st_size,
+                "records": len(self.posting_index),
+                "scaling": "posting_directory_bytes",
+                "wall_ms": (time.perf_counter_ns() - started) / 1_000_000,
+            }
+        }
         self._game_data_name = (
             "games.bin"
             if self.manifest.get("game_metadata_codec") == "zlib-json-v1"
@@ -191,6 +234,7 @@ class PackedIndex:
         )
         self._streams = []
         self._maps = {}
+        started = time.perf_counter_ns()
         for name in (
             "nodes.bin",
             "edges.bin",
@@ -206,6 +250,14 @@ class PackedIndex:
                 if (self.directory / name).stat().st_size
                 else None
             )
+        self.startup_profile["mmap_construction"] = {
+            "files": len(self._streams),
+            "mapped_bytes": sum(
+                (self.directory / name).stat().st_size for name in self._maps
+            ),
+            "scaling": "mapped_file_count",
+            "wall_ms": (time.perf_counter_ns() - started) / 1_000_000,
+        }
         self._posting_cache = {}
 
     def close(self):
@@ -247,20 +299,21 @@ class PackedIndex:
         if key not in self._posting_cache:
             record = self.posting_index.get(key)
             if record is None:
-                values = () if self.manifest["postings"] == "sorted" else b""
+                values = (
+                    SortedPosting(b"", offset=0, count=0)
+                    if self.manifest["postings"] == "sorted"
+                    else b""
+                )
             elif self.manifest["postings"] == "bitmap":
                 offset = record["offset"]
                 values = zlib.decompress(
                     self._maps["postings.bin"][offset : offset + record["bytes"]]
                 )
             else:
-                offset = record["offset"]
-                count = record["count"]
-                values = tuple(
-                    UINT32.unpack_from(
-                        self._maps["postings.bin"], offset + index * UINT32.size
-                    )[0]
-                    for index in range(count)
+                values = SortedPosting(
+                    self._maps["postings.bin"],
+                    offset=record["offset"],
+                    count=record["count"],
                 )
             self._posting_cache[key] = values
         return self._posting_cache[key]
@@ -291,7 +344,7 @@ class PackedIndex:
             return tuple(selected)
         postings = [self._posting(key) for key in keys]
         slices = [
-            posting[bisect_left(posting, start) : bisect_left(posting, end)]
+            posting.values_between(start, end)
             for posting in postings
         ]
         if len(slices) == 1:
@@ -313,7 +366,7 @@ class PackedIndex:
     def _posting_count(self, key, start, end):
         posting = self._posting(key)
         if self.manifest["postings"] == "sorted":
-            return bisect_left(posting, end) - bisect_left(posting, start)
+            return posting.count_between(start, end)
         count = 0
         first_byte = start // 8
         last_byte = (end - 1) // 8 if end > start else first_byte - 1

@@ -558,7 +558,22 @@ This architecture is selected only for the representative artifact. The
 projected 2.58 GB file exceeds the standard Function bundle limit; no full
 artifact path is frozen.
 
-## Full-tree startup and scale boundary — next slice
+## Full-tree startup and scale boundary — measured 4 August 2026
+
+The hypothesized boundary below is now demonstrated. The full immutable tree
+contains 6,516,478 accepted games in 2,524,966,683 component bytes. Fresh
+startup is 5.96 s P50: approximately 0.95 s checksum, 4.90 s structural
+validation, 0.10 s posting-directory parse, and 0.007 s mmap construction.
+The first and warm root neighborhoods remain bounded at approximately 23 ms
+after replacing whole-posting tuple materialization with mmap-backed range
+reads. Peak startup RSS is approximately 522 MB because validation touches the
+node/edge record pages; mapping itself is file-count work.
+
+Two independent builds from the restored snapshot are component-identical.
+The representative remains the correctness/rollback oracle, and publication,
+correction, rollback, and pointer-only removal preserve immutable artifact
+bytes. Full evidence is in
+[`FULL_OPENING_TREE_SCALE_UP_RESULT_2026-08-04.md`](FULL_OPENING_TREE_SCALE_UP_RESULT_2026-08-04.md).
 
 The browser startup path remains deliberately bounded:
 

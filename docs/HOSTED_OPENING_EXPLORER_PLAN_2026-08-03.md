@@ -1,5 +1,23 @@
 # Hosted representative opening explorer plan — 3 August 2026
 
+## 4 August 2026 full-scale continuation
+
+The representative plan below is complete and remains the rollback oracle. The
+full artifact has now been built twice and validated locally: 6,516,478 games,
+11,625,223 nodes, and 2,524,966,683 component bytes. Current Vercel Large
+Functions public beta supports up to 5 GB on Fluid compute; live read-only
+inspection confirms the existing service project is Fluid-enabled and new
+enough for automatic enrolment.
+
+The recommended next step is a separately approved protected Preview using one
+full immutable artifact. It is not an approved upload or production switch.
+Object-storage materialization is rejected for the current mmap reader, the
+external 1–2 GB container remains a paid control, and a database projection is
+deferred unless the Large Function trial fails. See
+[`FULL_OPENING_TREE_SCALE_UP_RESULT_2026-08-04.md`](FULL_OPENING_TREE_SCALE_UP_RESULT_2026-08-04.md)
+for measured cold/warm phases, local browser/concurrency results, current costs,
+and the correction/rollback/removal procedure.
+
 ## Decision and objective
 
 The next slice will put the validated 91,911-game representative opening tree

@@ -1,5 +1,18 @@
 # Full opening-tree scale-up plan — 3 August 2026
 
+## 4 August 2026 status
+
+Workstreams A–D are complete locally. The first-load phases are measured, the
+restored input and recovery headroom passed preflight, two deterministic full
+artifacts were built and validated, local service/browser/lifecycle tests
+passed, and current official hosting limits were refreshed. The measured
+result and commands are in
+[`FULL_OPENING_TREE_SCALE_UP_RESULT_2026-08-04.md`](FULL_OPENING_TREE_SCALE_UP_RESULT_2026-08-04.md).
+
+Workstream E remains approval-gated. The recommendation is a protected,
+preview-only Vercel Large Functions trial; no full upload, paid provisioning,
+production configuration, promotion, commit, or push has occurred.
+
 ## Objective
 
 Scale the settled exact-prefix opening explorer from the validated 91,911-game

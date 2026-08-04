@@ -1,7 +1,21 @@
 from bughouse_explorer.opening.model import QueryFilter
-from bughouse_explorer.opening.packed import PackedIndex, build_packed_index
+from bughouse_explorer.opening.packed import (
+    UINT32,
+    PackedIndex,
+    SortedPosting,
+    build_packed_index,
+)
 from bughouse_explorer.opening.relational import RelationalIndex, build_relational_index
 from opening_fixtures import E4, E5, corpus, game
+
+
+def test_sorted_posting_counts_and_reads_only_the_requested_ordinal_interval():
+    payload = b"head" + b"".join(UINT32.pack(value) for value in (1, 3, 7, 9, 20))
+    posting = SortedPosting(payload, offset=4, count=5)
+
+    assert posting.count_between(4, 10) == 2
+    assert posting.values_between(2, 9) == (3, 7)
+    assert posting.values_between(21, 30) == ()
 
 
 def test_packed_sorted_postings_match_relational_query_contract(tmp_path):

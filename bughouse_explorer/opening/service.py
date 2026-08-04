@@ -13,7 +13,7 @@ import time
 
 from .model import QueryFilter
 from .packed import PackedIndex, UINT32
-from .publication import validate_artifact
+from .publication import validate_artifact_profiled
 
 
 DEFAULT_TARGET_DEPTH = 5
@@ -43,14 +43,20 @@ class OpeningReadService:
     """Own one validated, read-only, memory-mapped dataset version."""
 
     def __init__(self, artifact):
+        startup_started = time.perf_counter_ns()
         self.artifact = Path(artifact).resolve()
-        validated = validate_artifact(self.artifact)
+        validated, phases = validate_artifact_profiled(self.artifact)
         if not validated.format.startswith("packed-sorted"):
             raise ValueError("opening service requires packed sorted postings")
         self.index = PackedIndex(self.artifact)
         if self.index.manifest["build_id"] != validated.build_id:
             self.index.close()
             raise ValueError("validated build id changed while opening artifact")
+        phases.update(self.index.startup_profile)
+        self.startup_profile = {
+            "phases": phases,
+            "total_wall_ms": (time.perf_counter_ns() - startup_started) / 1_000_000,
+        }
 
     def close(self):
         self.index.close()
