@@ -2,10 +2,12 @@
 
 > **4 August 2026 status:** local workstreams are complete. Do not rerun the
 > full build or upload the artifact by treating this prompt as unfinished.
-> Continue from
-> [`FULL_OPENING_TREE_SCALE_UP_RESULT_2026-08-04.md`](FULL_OPENING_TREE_SCALE_UP_RESULT_2026-08-04.md).
-> The next action is an explicit approval decision for a protected, preview-only
-> Vercel Large Functions trial; Production remains separately gated.
+> Continue with
+> [`VERCEL_LARGE_FUNCTION_PREVIEW_PROMPT.md`](VERCEL_LARGE_FUNCTION_PREVIEW_PROMPT.md)
+> and its operative
+> [`VERCEL_LARGE_FUNCTION_PREVIEW_PLAN_2026-08-04.md`](VERCEL_LARGE_FUNCTION_PREVIEW_PLAN_2026-08-04.md).
+> The transport rehearsal, full Preview upload, paid-resource use, and
+> Production promotion remain separately approval-gated.
 
 Continue work in both repositories:
 
