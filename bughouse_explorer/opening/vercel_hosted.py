@@ -7,6 +7,14 @@ from .service import create_opening_service
 from .vercel_stage import AUTHORIZED_ARTIFACT_NAME
 
 
+AUTHORIZED_HOSTED_ARTIFACT_NAMES = frozenset(
+    {
+        AUTHORIZED_ARTIFACT_NAME,
+        "full-post-qualification-20260802-v2-a",
+    }
+)
+
+
 def _positive_int(environ, name, default):
     raw = environ.get(name, str(default))
     try:
@@ -30,8 +38,13 @@ def create_vercel_app(*, environ=None, project_root=None, factory=create_opening
     wait_ms = _positive_int(
         environ, "OPENING_EXPLORER_CONCURRENCY_WAIT_MS", 50
     )
+    artifact_name = environ.get(
+        "OPENING_EXPLORER_ARTIFACT_NAME", AUTHORIZED_ARTIFACT_NAME
+    )
+    if artifact_name not in AUTHORIZED_HOSTED_ARTIFACT_NAMES:
+        raise RuntimeError("OPENING_EXPLORER_ARTIFACT_NAME is not authorized")
     root = Path(project_root or Path(__file__).resolve().parents[2]).resolve()
-    artifact = (root / "artifacts" / "opening" / AUTHORIZED_ARTIFACT_NAME).resolve()
+    artifact = (root / "artifacts" / "opening" / artifact_name).resolve()
     return factory(
         artifact,
         allowed_origins=(),

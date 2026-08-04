@@ -20,4 +20,8 @@ frontend/dist/
 
 # Versioned derived opening artifacts and local benchmark evidence
 artifacts/
+
+# Generated transport staging and interruption journals (always external in normal use)
+/transport/
+*.upload-journal
 .vercel

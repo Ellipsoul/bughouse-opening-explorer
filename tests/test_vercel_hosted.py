@@ -43,6 +43,43 @@ def test_vercel_app_uses_only_fixed_artifact_and_server_proxy_boundary(tmp_path)
     ]
 
 
+def test_vercel_app_selects_the_allowlisted_full_artifact_from_server_only_env(
+    tmp_path,
+):
+    calls = []
+
+    app = create_vercel_app(
+        environ={
+            "OPENING_EXPLORER_SERVICE_TOKEN": "server-secret",
+            "OPENING_EXPLORER_ARTIFACT_NAME": (
+                "full-post-qualification-20260802-v2-a"
+            ),
+        },
+        project_root=tmp_path,
+        factory=lambda artifact, **_options: calls.append(artifact) or "app",
+    )
+
+    assert app == "app"
+    assert calls == [
+        Path(
+            tmp_path,
+            "artifacts/opening/full-post-qualification-20260802-v2-a",
+        ).resolve()
+    ]
+
+
+def test_vercel_app_rejects_a_non_allowlisted_artifact_name(tmp_path):
+    with pytest.raises(RuntimeError, match="ARTIFACT_NAME"):
+        create_vercel_app(
+            environ={
+                "OPENING_EXPLORER_SERVICE_TOKEN": "server-secret",
+                "OPENING_EXPLORER_ARTIFACT_NAME": "full-post-qualification-20260802-v2-b",
+            },
+            project_root=tmp_path,
+            factory=lambda *_args, **_kwargs: None,
+        )
+
+
 @pytest.mark.parametrize(
     ("name", "value"),
     (

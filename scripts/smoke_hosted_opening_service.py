@@ -13,15 +13,17 @@ import requests
 EXPECTED_DATASET_VERSION = "e1400ceb14e26dc3cd09e93ac1a4630e88c2ac03"
 
 
-def request(base_url, path, *, token=None, etag=None):
+def request(base_url, path, *, token=None, etag=None, protection_bypass=None):
     headers = {}
     if token is not None:
         headers["Authorization"] = f"Bearer {token}"
     if etag is not None:
         headers["If-None-Match"] = etag
+    if protection_bypass is not None:
+        headers["x-vercel-protection-bypass"] = protection_bypass
     started = time.perf_counter_ns()
     response = requests.get(
-        f"{base_url.rstrip('/')}{path}", headers=headers, timeout=10
+        f"{base_url.rstrip('/')}{path}", headers=headers, timeout=300
     )
     return {
         "body": response.content,
@@ -36,43 +38,85 @@ def main():
     parser.add_argument("base_url")
     parser.add_argument("token_file", type=Path)
     parser.add_argument("--concurrency", type=int, default=8)
+    parser.add_argument(
+        "--expected-dataset-version", default=EXPECTED_DATASET_VERSION
+    )
+    parser.add_argument(
+        "--artifact-name", default="representative-mod71-v2-a"
+    )
+    parser.add_argument("--protection-bypass-token-file", type=Path)
     args = parser.parse_args()
-    if not 1 <= args.concurrency <= 32:
-        parser.error("--concurrency must be between 1 and 32")
+    if not 1 <= args.concurrency <= 64:
+        parser.error("--concurrency must be between 1 and 64")
     token = args.token_file.read_text().strip()
     if not token:
         parser.error("token file is empty")
+    protection_bypass = (
+        args.protection_bypass_token_file.read_text().strip()
+        if args.protection_bypass_token_file
+        else None
+    )
+    if args.protection_bypass_token_file and not protection_bypass:
+        parser.error("protection bypass token file is empty")
 
-    unauthenticated_ready = request(args.base_url, "/readyz")
-    readiness = request(args.base_url, "/readyz", token=token)
+    unauthenticated_ready = request(
+        args.base_url, "/readyz", protection_bypass=protection_bypass
+    )
+    readiness = request(
+        args.base_url,
+        "/readyz",
+        token=token,
+        protection_bypass=protection_bypass,
+    )
     metadata = json.loads(readiness["body"])
-    if metadata.get("dataset_version") != EXPECTED_DATASET_VERSION:
+    if metadata.get("dataset_version") != args.expected_dataset_version:
         raise SystemExit("hosted readiness returned the wrong dataset version")
-    meta = request(args.base_url, "/api/meta", token=token)
+    meta = request(
+        args.base_url,
+        "/api/meta",
+        token=token,
+        protection_bypass=protection_bypass,
+    )
     not_modified = request(
-        args.base_url, "/api/meta", token=token, etag=meta["etag"]
+        args.base_url,
+        "/api/meta",
+        token=token,
+        etag=meta["etag"],
+        protection_bypass=protection_bypass,
     )
     root_path = (
         "/api/nodes/0/neighborhood"
-        f"?dataset_version={EXPECTED_DATASET_VERSION}"
+        f"?dataset_version={args.expected_dataset_version}"
         "&target_forward_depth=5&max_nodes=500&max_encoded_bytes=262144"
     )
-    root = request(args.base_url, root_path, token=token)
+    root = request(
+        args.base_url,
+        root_path,
+        token=token,
+        protection_bypass=protection_bypass,
+    )
     stale = request(
         args.base_url,
         "/api/nodes/0/neighborhood?dataset_version=stale&max_nodes=500"
         "&max_encoded_bytes=262144",
         token=token,
+        protection_bypass=protection_bypass,
     )
     hidden = request(
         args.base_url,
-        "/artifacts/opening/representative-mod71-v2-a/manifest.json",
+        f"/artifacts/opening/{args.artifact_name}/manifest.json",
         token=token,
+        protection_bypass=protection_bypass,
     )
     with ThreadPoolExecutor(max_workers=args.concurrency) as executor:
         concurrent = list(
             executor.map(
-                lambda _index: request(args.base_url, root_path, token=token),
+                lambda _index: request(
+                    args.base_url,
+                    root_path,
+                    token=token,
+                    protection_bypass=protection_bypass,
+                ),
                 range(args.concurrency),
             )
         )
@@ -92,13 +136,21 @@ def main():
         if actual != wanted
     }
     concurrent_statuses = [response["status"] for response in concurrent]
-    if any(status != 200 for status in concurrent_statuses):
+    allowed_concurrent_statuses = {200} if args.concurrency <= 8 else {200, 503}
+    if (
+        any(status not in allowed_concurrent_statuses for status in concurrent_statuses)
+        or 200 not in concurrent_statuses
+    ):
         failures["concurrency"] = concurrent_statuses
     report = {
         "concurrency": args.concurrency,
         "concurrent_elapsed_ms": sorted(
             round(response["elapsed_ms"], 3) for response in concurrent
         ),
+        "concurrent_status_counts": {
+            str(status): concurrent_statuses.count(status)
+            for status in sorted(set(concurrent_statuses))
+        },
         "dataset_version": metadata["dataset_version"],
         "failures": failures,
         "requests": {

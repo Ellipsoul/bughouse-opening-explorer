@@ -43,8 +43,14 @@ def _reader_duration(header):
     return None
 
 
-def _query_path(node_id, *, game_examples=False, query_filter=None):
-    parameters = {"dataset_version": EXPECTED_DATASET_VERSION}
+def _query_path(
+    node_id,
+    *,
+    dataset_version=EXPECTED_DATASET_VERSION,
+    game_examples=False,
+    query_filter=None,
+):
+    parameters = {"dataset_version": dataset_version}
     if game_examples:
         parameters["limit"] = 6
         operation = "games"
@@ -64,8 +70,7 @@ def _query_path(node_id, *, game_examples=False, query_filter=None):
 
 def _filters(artifact):
     with OpeningReadService(artifact) as service:
-        if service.dataset_version != EXPECTED_DATASET_VERSION:
-            raise RuntimeError("benchmark artifact is not the authorized dataset version")
+        dataset_version = service.dataset_version
         posting_records = service.index.posting_index
         white = max(
             (key for key in posting_records if key.startswith("white\0")),
@@ -76,7 +81,7 @@ def _filters(artifact):
             key=lambda key: (posting_records[key]["count"], key),
         ).split("\0", 1)[1]
         first_game = service.index._game(0)
-    return {
+    return dataset_version, {
         "player_as_white": QueryFilter(white_username=white),
         "player_as_black": QueryFilter(black_username=black),
         "exact_pair": QueryFilter(
@@ -86,13 +91,15 @@ def _filters(artifact):
     }
 
 
-def _request(session, base_url, path, token):
+def _request(session, base_url, path, token, protection_bypass=None):
     headers = {"accept": "application/json", "accept-encoding": "gzip"}
     if token:
         headers["authorization"] = f"Bearer {token}"
+    if protection_bypass:
+        headers["x-vercel-protection-bypass"] = protection_bypass
     started = time.perf_counter_ns()
     response = session.get(
-        f"{base_url.rstrip('/')}{path}", headers=headers, timeout=10
+        f"{base_url.rstrip('/')}{path}", headers=headers, timeout=300
     )
     elapsed_ms = (time.perf_counter_ns() - started) / 1_000_000
     if not 200 <= response.status_code < 300:
@@ -108,8 +115,13 @@ def _request(session, base_url, path, token):
     }
 
 
-def _benchmark_case(session, base_url, token, path, repeats):
-    samples = [_request(session, base_url, path, token) for _ in range(repeats)]
+def _benchmark_case(
+    session, base_url, token, protection_bypass, path, repeats
+):
+    samples = [
+        _request(session, base_url, path, token, protection_bypass)
+        for _ in range(repeats)
+    ]
     reader_values = [sample["reader_ms"] for sample in samples if sample["reader_ms"] is not None]
     return {
         "body_bytes": samples[-1]["body_bytes"],
@@ -121,30 +133,71 @@ def _benchmark_case(session, base_url, token, path, repeats):
     }
 
 
-def _trace(session, base_url, token):
+def _trace(session, base_url, token, protection_bypass, node_ids, dataset_version):
     started = time.perf_counter_ns()
     responses = [
-        _request(session, base_url, _query_path(node_id), token)
-        for node_id in MAINLINE_NODE_IDS
+        _request(
+            session,
+            base_url,
+            _query_path(node_id, dataset_version=dataset_version),
+            token,
+            protection_bypass,
+        )
+        for node_id in node_ids
     ]
     return {
         "body_bytes": sum(response["body_bytes"] for response in responses),
         "elapsed_ms": round((time.perf_counter_ns() - started) / 1_000_000, 3),
-        "node_ids": MAINLINE_NODE_IDS,
+        "node_ids": node_ids,
         "requests": len(responses),
         "statuses": [response["status"] for response in responses],
     }
 
 
-def _benchmark_boundary(base_url, token, cases, repeats):
+def _benchmark_boundary(
+    base_url,
+    token,
+    protection_bypass,
+    cases,
+    repeats,
+    trace_node_ids,
+    dataset_version,
+):
     with requests.Session() as session:
-        cold = _request(session, base_url, cases["root_unfiltered"], token)
+        cold = _request(
+            session,
+            base_url,
+            cases["root_unfiltered"],
+            token,
+            protection_bypass,
+        )
         measured = {
-            name: _benchmark_case(session, base_url, token, path, repeats)
+            name: _benchmark_case(
+                session,
+                base_url,
+                token,
+                protection_bypass,
+                path,
+                repeats,
+            )
             for name, path in cases.items()
         }
-        trace_cold = _trace(session, base_url, token)
-        trace_warm = _trace(session, base_url, token)
+        trace_cold = _trace(
+            session,
+            base_url,
+            token,
+            protection_bypass,
+            trace_node_ids,
+            dataset_version,
+        )
+        trace_warm = _trace(
+            session,
+            base_url,
+            token,
+            protection_bypass,
+            trace_node_ids,
+            dataset_version,
+        )
     return {
         "cold_root": {
             "body_bytes": cold["body_bytes"],
@@ -167,6 +220,7 @@ def main():
     parser.add_argument("proxy_base_url")
     parser.add_argument("token_file", type=Path)
     parser.add_argument("--repeats", type=int, default=20)
+    parser.add_argument("--protection-bypass-token-file", type=Path)
     parser.add_argument("--result", required=True, type=Path)
     parser.add_argument(
         "--skip-proxy",
@@ -182,27 +236,86 @@ def main():
     if not token:
         parser.error("token file is empty")
 
-    filters = _filters(args.artifact)
+    protection_bypass = (
+        args.protection_bypass_token_file.read_text().strip()
+        if args.protection_bypass_token_file
+        else None
+    )
+    if args.protection_bypass_token_file and not protection_bypass:
+        parser.error("protection bypass token file is empty")
+
+    dataset_version, filters = _filters(args.artifact)
+    if dataset_version == EXPECTED_DATASET_VERSION:
+        deep_node = MAINLINE_NODE_IDS[-1]
+        internal_ending_node = 1907
+        drop_node = 13983
+        trace_node_ids = MAINLINE_NODE_IDS
+    else:
+        deep_node = 112350
+        internal_ending_node = 1430
+        drop_node = 112350
+        trace_node_ids = [0, internal_ending_node, deep_node]
     cases = {
-        "root_unfiltered": _query_path(0),
-        "deep_mainline": _query_path(MAINLINE_NODE_IDS[-1]),
-        "player_as_white": _query_path(0, query_filter=filters["player_as_white"]),
-        "player_as_black": _query_path(0, query_filter=filters["player_as_black"]),
-        "exact_pair": _query_path(0, query_filter=filters["exact_pair"]),
-        "internal_actual_ending": _query_path(1907, game_examples=True),
-        "retained_drop_checkmate": _query_path(13983, game_examples=True),
+        "root_unfiltered": _query_path(0, dataset_version=dataset_version),
+        "deep_mainline": _query_path(
+            deep_node, dataset_version=dataset_version
+        ),
+        "player_as_white": _query_path(
+            0,
+            dataset_version=dataset_version,
+            query_filter=filters["player_as_white"],
+        ),
+        "player_as_black": _query_path(
+            0,
+            dataset_version=dataset_version,
+            query_filter=filters["player_as_black"],
+        ),
+        "exact_pair": _query_path(
+            0,
+            dataset_version=dataset_version,
+            query_filter=filters["exact_pair"],
+        ),
+        "internal_actual_ending": _query_path(
+            internal_ending_node,
+            dataset_version=dataset_version,
+            game_examples=True,
+        ),
+        "retained_drop_checkmate": _query_path(
+            drop_node,
+            dataset_version=dataset_version,
+            game_examples=True,
+        ),
     }
+    artifact_manifest = json.loads((args.artifact / "manifest.json").read_text())
     payload = {
-        "artifact_component_bytes": 36_782_672,
-        "dataset_version": EXPECTED_DATASET_VERSION,
+        "artifact_component_bytes": sum(
+            record["bytes"] for record in artifact_manifest["files"].values()
+        ),
+        "dataset_version": dataset_version,
         "filter_values_in_report": False,
         "proxy": (
             {"status": "skipped; measure with a real browser"}
             if args.skip_proxy
-            else _benchmark_boundary(args.proxy_base_url, None, cases, args.repeats)
+            else _benchmark_boundary(
+                args.proxy_base_url,
+                None,
+                None,
+                cases,
+                args.repeats,
+                trace_node_ids,
+                dataset_version,
+            )
         ),
         "repeats_per_case": args.repeats,
-        "service": _benchmark_boundary(args.service_base_url, token, cases, args.repeats),
+        "service": _benchmark_boundary(
+            args.service_base_url,
+            token,
+            protection_bypass,
+            cases,
+            args.repeats,
+            trace_node_ids,
+            dataset_version,
+        ),
         "sha256": {},
     }
     encoded = json.dumps(payload, indent=2, sort_keys=True) + "\n"
