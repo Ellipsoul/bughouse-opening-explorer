@@ -1,5 +1,31 @@
 # Hosted opening explorer provider comparison — 3 August 2026
 
+## 4 August 2026 full-artifact update
+
+The projection used below has been replaced by a measured full artifact:
+2,524,966,683 component bytes, 6,516,478 accepted games, approximately 522 MB
+fresh-reader peak RSS, 5.96 s local reader startup, and approximately 23 ms
+bounded root neighborhoods. Two builds are component-identical.
+
+Official limits and live project state were refreshed on 4 August. Vercel Large
+Functions is a public beta supporting up to 5 GB uncompressed on Fluid compute;
+the existing service project was created after 30 June 2026, is Fluid-enabled,
+and is automatically eligible. The linked team remains Hobby (2 GB/1 vCPU; 4
+CPU-hours, 360 GB-hours, and 1M invocations included). The updated decision is
+to request approval for a protected, preview-only full Large Function trial.
+No full upload or production mutation has occurred.
+
+Vercel Blob materialization remains a poor fit because the artifact exceeds the
+1 GB Hobby allowance and 512 MB cacheable-blob threshold and the mmap reader
+requires complete local files. Render Standard is now the first external
+container fit at 2 GB/1 CPU and $25/month; Fly publishes 1-GB shared-CPU prices
+of roughly $6.13–$9.20/month by region before disk/egress. Turso/Neon remain
+unmeasured projections and are not warranted while the packed oracle passes.
+
+The authoritative measured comparison, official links, and staged lifecycle
+are in
+[`FULL_OPENING_TREE_SCALE_UP_RESULT_2026-08-04.md`](FULL_OPENING_TREE_SCALE_UP_RESULT_2026-08-04.md).
+
 ## Decision status
 
 The measured representative winner is a Python Vercel Function with the

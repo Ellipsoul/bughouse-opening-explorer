@@ -7,9 +7,10 @@ This project is a modified continuation of the original
 [Bughouse Opening Explorer by Oh-My-Lands](https://github.com/Oh-My-Lands/bughouse-opening-explorer).
 The original project supplied the opening-index, replay, read-server, and
 frontend foundation that remains in this repository for reference. The current
-raw crawl, qualification-correctness, and accepted recovery milestone is
-complete. The immediate product focus is a versioned derived opening index and
-bandwidth-conscious online explorer.
+raw crawl, qualification-correctness, accepted recovery milestone, and full
+local derived opening tree are complete. The immediate product focus is an
+approval-gated hosted trial of that immutable packed artifact and a bandwidth-
+conscious online explorer.
 
 The project is licensed under the
 [GNU Affero General Public License v3](https://www.gnu.org/licenses/agpl-3.0.html).
@@ -36,16 +37,17 @@ The result is an authoritative raw-game database that will feed an online
 opening tree and the
 [`bughouse-chess`](https://github.com/Ellipsoul/bughouse-chess) viewer.
 
-This phase does **not** provide a public game API or a deployed opening
-explorer. The legacy indexer, read server, and frontend are intentionally frozen
-until they are ported to consume the crawler database.
+The public browser receives only bounded opening-neighborhood responses; it
+never receives the raw database or packed artifact. A representative opening
+service and one-board explorer are deployed, while the full artifact remains
+local pending a separately approved preview trial.
 
 ## Platform direction
 
 ```text
-crawler.db (lossless raw truth)
+validated restored crawler snapshot (lossless raw truth copy)
         ↓
-versioned derived opening-index SQLite snapshot
+versioned packed-prefix-interval-v2 artifact
         ↓
 read-only FastAPI/read service
         ↓
@@ -62,6 +64,8 @@ See [`docs/PLATFORM_ARCHITECTURE.md`](docs/PLATFORM_ARCHITECTURE.md) for the
 layer contracts, publication lifecycle, bandwidth rules, and failure
 isolation. See [`docs/BACKUP_RECOVERY.md`](docs/BACKUP_RECOVERY.md) for the
 demonstrated backup and restore procedure that protects the raw source of truth.
+The measured full build and current hosting recommendation are in
+[`docs/FULL_OPENING_TREE_SCALE_UP_RESULT_2026-08-04.md`](docs/FULL_OPENING_TREE_SCALE_UP_RESULT_2026-08-04.md).
 
 ## How the crawl expands
 

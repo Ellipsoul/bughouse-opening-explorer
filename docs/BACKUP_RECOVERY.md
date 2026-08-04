@@ -294,6 +294,26 @@ resource record, correction procedure, and deletion record. Retain the
 validated representative artifact as the correctness oracle and immediate
 service rollback until the full version has passed local and hosted validation.
 
+### Demonstrated full-tree restore — 4 August 2026
+
+The contract above was exercised from the designated compressed recovery
+artifact
+`/Users/aronteh/Desktop/Coding_Adventures/bughouse/crawler-post-qualification-20260802.db.zst`.
+It is 3,160,490,691 bytes with SHA-256
+`90bc1778829eaf52bab881e0b02947e1635320a691f889330716635d94094872`;
+`zstd --test` passed.
+
+It was restored separately to
+`snapshots/full-tree-input-20260804/restored-crawler-post-qualification-20260802.db`.
+The restored file is 15,146,962,944 bytes with SHA-256
+`04b5694a288f1b0a966524090e991d70aa695096531933710a0a17f25bb5a5ac`.
+Read-only immutable SQLite validation returned `quick_check=ok`, zero foreign-
+key or policy/closure violations, and 6,516,478 adapter-accepted games. Two
+component-identical derived full builds were produced without opening or
+depending on `data/crawler.db`. The detailed counts, headroom, artifact hashes,
+and timings are recorded in
+[`FULL_OPENING_TREE_SCALE_UP_RESULT_2026-08-04.md`](FULL_OPENING_TREE_SCALE_UP_RESULT_2026-08-04.md).
+
 The SQLite online-backup behavior is documented at
 <https://www.sqlite.org/backup.html>. Per-table and per-index storage evidence
 can be measured read-only with `dbstat` as documented at

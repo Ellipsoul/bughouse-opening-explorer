@@ -3,7 +3,11 @@ from dataclasses import replace
 import pytest
 
 from bughouse_explorer.opening.packed import build_packed_index
-from bughouse_explorer.opening.publication import current_version, publish_version
+from bughouse_explorer.opening.publication import (
+    current_version,
+    publish_version,
+    remove_version,
+)
 from bughouse_explorer.opening.relational import build_relational_index
 from opening_fixtures import D4, D5, NF3, corpus
 
@@ -74,6 +78,25 @@ def test_corrected_rebuild_can_publish_and_roll_back_without_replacing_versions(
 
     assert current_version(pointer).build_id == first_id
     assert version_one.exists() and version_two.exists()
+
+
+def test_removal_deletes_only_the_publication_pointer(tmp_path):
+    artifact = tmp_path / "packed-v1"
+    pointer = tmp_path / "current.json"
+    build_packed_index(
+        corpus(), artifact, source_fingerprint="fixture-v1", postings="sorted"
+    )
+    component_hashes = {
+        path.name: _sha256(path) for path in artifact.iterdir() if path.is_file()
+    }
+    publish_version(artifact, pointer)
+
+    assert remove_version(pointer) is True
+    assert remove_version(pointer) is False
+    assert not pointer.exists()
+    assert {
+        path.name: _sha256(path) for path in artifact.iterdir() if path.is_file()
+    } == component_hashes
 
 
 def test_packed_publication_rejects_a_corrupted_candidate(tmp_path):

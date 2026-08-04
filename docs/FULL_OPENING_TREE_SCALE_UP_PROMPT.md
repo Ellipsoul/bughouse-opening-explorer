@@ -1,5 +1,12 @@
 # Full opening-tree scale-up prompt
 
+> **4 August 2026 status:** local workstreams are complete. Do not rerun the
+> full build or upload the artifact by treating this prompt as unfinished.
+> Continue from
+> [`FULL_OPENING_TREE_SCALE_UP_RESULT_2026-08-04.md`](FULL_OPENING_TREE_SCALE_UP_RESULT_2026-08-04.md).
+> The next action is an explicit approval decision for a protected, preview-only
+> Vercel Large Functions trial; Production remains separately gated.
+
 Continue work in both repositories:
 
 - `/Users/aronteh/Desktop/Coding_Adventures/bughouse-opening-explorer`

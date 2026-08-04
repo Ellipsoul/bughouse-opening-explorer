@@ -162,6 +162,39 @@ def test_service_reports_validated_versioned_dataset_metadata(tmp_path):
     }
 
 
+def test_fresh_reader_reports_separate_startup_phases_and_scaling_scopes(tmp_path):
+    artifact, _report = _artifact(tmp_path)
+
+    with OpeningReadService(artifact) as service:
+        profile = service.startup_profile
+
+    assert list(profile["phases"]) == [
+        "manifest_parse",
+        "component_stat",
+        "component_checksum",
+        "structural_validation",
+        "posting_directory_parse",
+        "mmap_construction",
+    ]
+    assert profile["phases"]["manifest_parse"]["scaling"] == "constant"
+    assert profile["phases"]["component_stat"]["scaling"] == "file_count"
+    assert profile["phases"]["component_checksum"]["scaling"] == "artifact_bytes"
+    assert profile["phases"]["structural_validation"]["scaling"] == "node_and_edge_records"
+    assert profile["phases"]["posting_directory_parse"]["scaling"] == "posting_directory_bytes"
+    assert profile["phases"]["mmap_construction"]["scaling"] == "mapped_file_count"
+    assert profile["phases"]["component_checksum"]["bytes"] == sum(
+        record["bytes"] for record in service.index.manifest["files"].values()
+    )
+    assert profile["phases"]["structural_validation"]["nodes"] == service.index.manifest["nodes"]
+    assert profile["phases"]["structural_validation"]["edges"] == service.index.manifest["edges"]
+    assert profile["phases"]["posting_directory_parse"]["records"] == len(service.index.posting_index)
+    assert profile["phases"]["mmap_construction"]["files"] == 6
+    assert all(phase["wall_ms"] >= 0 for phase in profile["phases"].values())
+    assert profile["total_wall_ms"] >= sum(
+        phase["wall_ms"] for phase in profile["phases"].values()
+    )
+
+
 def test_neighborhood_is_versioned_flat_budgeted_and_marks_every_frontier(tmp_path):
     artifact, report = _artifact(tmp_path)
 
