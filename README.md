@@ -67,6 +67,20 @@ demonstrated backup and restore procedure that protects the raw source of truth.
 The measured full build and current hosting recommendation are in
 [`docs/FULL_OPENING_TREE_SCALE_UP_RESULT_2026-08-04.md`](docs/FULL_OPENING_TREE_SCALE_UP_RESULT_2026-08-04.md).
 
+Player Insights follow a parallel snapshot-derived path: versioned analyzers
+build an immutable, queryable SQLite artifact, deterministic browser-safe
+projections are checked into `bughouse-chess`, and the public page imports them
+at build time. The canonical extension and refresh contract is
+[`docs/PLAYER_INSIGHTS_DEVELOPMENT_GUIDE.md`](docs/PLAYER_INSIGHTS_DEVELOPMENT_GUIDE.md);
+the automated first-of-month procedure is
+[`docs/MONTHLY_DATA_AND_PLAYER_INSIGHTS_RUNBOOK.md`](docs/MONTHLY_DATA_AND_PLAYER_INSIGHTS_RUNBOOK.md);
+the reusable fresh-session blueprint is
+[`docs/PLAYER_INSIGHTS_SESSION_PROMPT.md`](docs/PLAYER_INSIGHTS_SESSION_PROMPT.md).
+The current shared artifact contains net material, Average King Height,
+colour-aware Piece Drop Heat Maps, and bounded Material Game Highs. The newest
+full extraction and static publication evidence are in
+[`docs/PLAYER_MATERIAL_GAME_HIGHS_INSIGHTS_RESULT_2026-08-12.md`](docs/PLAYER_MATERIAL_GAME_HIGHS_INSIGHTS_RESULT_2026-08-12.md).
+
 ## How the crawl expands
 
 ```text
@@ -201,6 +215,11 @@ To deliberately replay a different historical month, supply it explicitly:
 
 The production systemd timer in `deploy/bughouse-crawler-monthly.timer` runs the
 same default command at 03:00 UTC on the first day of each month.
+
+To continue from raw acquisition through a checked immutable snapshot, one
+shared rebuild of every registered Player Insight, deterministic projection
+validation, and optional local frontend replacement, follow the automated
+[`monthly data and Player Insights runbook`](docs/MONTHLY_DATA_AND_PLAYER_INSIGHTS_RUNBOOK.md).
 
 ## Configuration
 

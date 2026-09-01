@@ -2,6 +2,46 @@
 
 Read these documents in this order when resuming work:
 
+For the recurring first-of-month acquisition, discovery, immutable snapshot,
+and complete Player Insights refresh, follow
+[`MONTHLY_DATA_AND_PLAYER_INSIGHTS_RUNBOOK.md`](MONTHLY_DATA_AND_PLAYER_INSIGHTS_RUNBOOK.md).
+It is the operator entrypoint for `scripts/run_monthly_refresh.py`, interruption
+recovery, verification, new-insight registration, and rollback boundaries.
+The completed first execution is recorded in
+[`MONTHLY_DATA_AND_PLAYER_INSIGHTS_RESULT_2026-09-01.md`](MONTHLY_DATA_AND_PLAYER_INSIGHTS_RESULT_2026-09-01.md),
+including the 68-player enrollment ledger, snapshot and artifact identities,
+projection checksums, and end-to-end verification evidence.
+
+For any Player Insights work, start with
+[`PLAYER_INSIGHTS_DEVELOPMENT_GUIDE.md`](PLAYER_INSIGHTS_DEVELOPMENT_GUIDE.md),
+then use the fill-in
+[`PLAYER_INSIGHTS_SESSION_PROMPT.md`](PLAYER_INSIGHTS_SESSION_PROMPT.md) to
+prime a fresh session. The completed reference implementation is recorded in
+[`PLAYER_MATERIAL_INSIGHTS_RESULT_2026-08-05.md`](PLAYER_MATERIAL_INSIGHTS_RESULT_2026-08-05.md):
+the first full 1,013-player extraction, standalone SQLite schema, capture
+semantics, `undefined`-TCN exclusion policy, deterministic static web export,
+validation evidence, and snapshot-driven refresh procedure.
+Average King Height's exact cohort, replay, denominator, height normalization,
+score-8 evidence, publication, and UI contracts are in
+[`PLAYER_KING_HEIGHT_INSIGHT_SPEC_2026-08-06.md`](PLAYER_KING_HEIGHT_INSIGHT_SPEC_2026-08-06.md).
+Its completed 6.5-million-game build, corpus distribution, deterministic
+projection, UI, and validation evidence are recorded in
+[`PLAYER_KING_HEIGHT_INSIGHTS_RESULT_2026-08-06.md`](PLAYER_KING_HEIGHT_INSIGHTS_RESULT_2026-08-06.md).
+Piece Drop Heat Maps' colour channels, rank-normalized combined view,
+denominators, stored/exported fields, and multi-player comparison UI are
+defined in
+[`PLAYER_DROP_HEATMAP_INSIGHT_SPEC_2026-08-09.md`](PLAYER_DROP_HEATMAP_INSIGHT_SPEC_2026-08-09.md).
+Its completed full extraction, corpus distribution, static-size decision,
+responsive comparison UI, and validation evidence are recorded in
+[`PLAYER_DROP_HEATMAP_INSIGHTS_RESULT_2026-08-09.md`](PLAYER_DROP_HEATMAP_INSIGHTS_RESULT_2026-08-09.md).
+Material Game Highs' signed single-game net, bounded top-three retention,
+preset-specific rankings, public-game reference policy, and responsive
+final-board UI are defined in
+[`PLAYER_MATERIAL_GAME_HIGHS_INSIGHT_SPEC_2026-08-12.md`](PLAYER_MATERIAL_GAME_HIGHS_INSIGHT_SPEC_2026-08-12.md).
+Its completed 6.5-million-game extraction, deterministic projection, static
+analysis-board renderer, and validation evidence are recorded in
+[`PLAYER_MATERIAL_GAME_HIGHS_INSIGHTS_RESULT_2026-08-12.md`](PLAYER_MATERIAL_GAME_HIGHS_INSIGHTS_RESULT_2026-08-12.md).
+
 Start with [`VERCEL_LARGE_FUNCTION_PRODUCTION_RESULT_2026-08-04.md`](VERCEL_LARGE_FUNCTION_PRODUCTION_RESULT_2026-08-04.md)
 for the completed interruption rehearsal, full upload, protected Preview,
 Production materialization, oracle, browser, cost, cleanup, and rollback

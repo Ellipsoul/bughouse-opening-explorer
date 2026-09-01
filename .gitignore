@@ -21,6 +21,9 @@ frontend/dist/
 # Versioned derived opening artifacts and local benchmark evidence
 artifacts/
 
+# Checked monthly source snapshots and machine-readable run records
+/snapshots/
+
 # Generated transport staging and interruption journals (always external in normal use)
 /transport/
 *.upload-journal
