@@ -6,6 +6,18 @@ corpus, the rebuildable opening tree, the public read service, and the
 phase; measurements from representative index builds may refine implementation
 details without collapsing these ownership boundaries.
 
+> **September 2026 amendment.** The ownership, publication, and bounded-read
+> boundaries in this document remain current, but its move-prefix node model is
+> now the rollback architecture. New artifacts use the transposition-aware
+> `packed-position-graph-v1` contract defined in
+> [`OPENING_POSITION_GRAPH_REFACTOR_2026-09-01.md`](OPENING_POSITION_GRAPH_REFACTOR_2026-09-01.md):
+> piece placement identifies a node; side to move, castling, and en-passant
+> identify a navigation state; parent-state/token/child-state identifies an
+> edge; and the browser owns arrival history. Statements below that say exact
+> move prefix is node identity or that transpositions remain separate should be
+> read as historical evidence for `packed-prefix-interval-v2`, not as the active
+> graph contract.
+
 ## Architecture at a glance
 
 ```mermaid

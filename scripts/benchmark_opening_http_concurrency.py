@@ -58,18 +58,23 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("base_url")
     parser.add_argument("dataset_version")
+    parser.add_argument("--node-id", type=int, default=0)
+    parser.add_argument("--state-id", type=int)
     parser.add_argument("--levels", default="1,8,32,64")
     parser.add_argument("--waves", type=int, default=3)
     args = parser.parse_args()
     query = urllib.parse.urlencode(
         {
             "dataset_version": args.dataset_version,
+            **({"state_id": args.state_id} if args.state_id is not None else {}),
             "target_forward_depth": 5,
             "max_nodes": 500,
             "max_encoded_bytes": 262144,
         }
     )
-    url = f"{args.base_url.rstrip('/')}/api/nodes/0/neighborhood?{query}"
+    url = (
+        f"{args.base_url.rstrip('/')}/api/nodes/{args.node_id}/neighborhood?{query}"
+    )
     levels = [int(value) for value in args.levels.split(",")]
     payload = {
         "dataset_version": args.dataset_version,

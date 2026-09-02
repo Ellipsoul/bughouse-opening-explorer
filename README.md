@@ -47,18 +47,23 @@ local pending a separately approved preview trial.
 ```text
 validated restored crawler snapshot (lossless raw truth copy)
         ↓
-versioned packed-prefix-interval-v2 artifact
+versioned packed-position-graph-v1 artifact
         ↓
-read-only FastAPI/read service
+state-qualified read-only FastAPI service
         ↓
-bughouse-chess Next.js interface
+graph-aware bughouse-chess Next.js interface
 ```
 
 The raw crawler database remains ordinary, lossless, queryable SQLite and is
-never sent to a browser. The opening tree is a separately rebuildable,
-read-optimized snapshot. The API serves bounded, versioned position and branch
-responses, and the client loads only the data required for the current
-navigation.
+never sent to a browser. The opening graph is a separately rebuildable,
+read-optimized snapshot. Piece placement is canonical node identity; side to
+move, castling, and en-passant remain state-qualified navigation context. The
+API serves bounded, versioned node/state/edge responses, and the client loads
+only the data required for the current navigation.
+
+The transposition contract, edge cases, rehearsal measurements, and full-build
+gate are recorded in
+[`docs/OPENING_POSITION_GRAPH_REFACTOR_2026-09-01.md`](docs/OPENING_POSITION_GRAPH_REFACTOR_2026-09-01.md).
 
 See [`docs/PLATFORM_ARCHITECTURE.md`](docs/PLATFORM_ARCHITECTURE.md) for the
 layer contracts, publication lifecycle, bandwidth rules, and failure

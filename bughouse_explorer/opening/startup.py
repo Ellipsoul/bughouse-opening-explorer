@@ -46,6 +46,7 @@ def measure_first_load(artifact):
         neighborhood_call = lambda: service.neighborhood(
             dataset_version=version,
             anchor_node_id=metadata["root_node_id"],
+            anchor_state_id=metadata.get("root_state_id"),
         )
         _first_neighborhood_response, first_neighborhood = _timed_json(
             neighborhood_call,

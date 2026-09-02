@@ -13,6 +13,7 @@ import time
 
 from .model import QueryFilter
 from .packed import PackedIndex, UINT32
+from .position_graph_packed import PackedPositionGraph
 from .publication import validate_artifact_profiled
 
 
@@ -46,13 +47,18 @@ class OpeningReadService:
         startup_started = time.perf_counter_ns()
         self.artifact = Path(artifact).resolve()
         validated, phases = validate_artifact_profiled(self.artifact)
-        if not validated.format.startswith("packed-sorted"):
+        self.graph_mode = validated.format == "packed-position-graph"
+        if not self.graph_mode and not validated.format.startswith("packed-sorted"):
             raise ValueError("opening service requires packed sorted postings")
-        self.index = PackedIndex(self.artifact)
+        self.index = (
+            PackedPositionGraph(self.artifact)
+            if self.graph_mode
+            else PackedIndex(self.artifact)
+        )
         if self.index.manifest["build_id"] != validated.build_id:
             self.index.close()
             raise ValueError("validated build id changed while opening artifact")
-        phases.update(self.index.startup_profile)
+        phases.update(getattr(self.index, "startup_profile", {}))
         self.startup_profile = {
             "phases": phases,
             "total_wall_ms": (time.perf_counter_ns() - startup_started) / 1_000_000,
@@ -81,7 +87,15 @@ class OpeningReadService:
             "format_version": manifest.get(
                 "format_version", "packed-prefix-interval-v1"
             ),
-            "root_node_id": 0,
+            "root_node_id": manifest.get("root_node_id", 0),
+            **(
+                {
+                    "replay_policy": manifest["replay_policy"],
+                    "root_state_id": manifest["root_state_id"],
+                }
+                if self.graph_mode
+                else {}
+            ),
             "terminal_policy": manifest["terminal_policy"],
         }
 
@@ -146,6 +160,7 @@ class OpeningReadService:
         *,
         dataset_version,
         anchor_node_id: int,
+        anchor_state_id: int | None = None,
         target_forward_depth: int = DEFAULT_TARGET_DEPTH,
         max_nodes: int = DEFAULT_MAX_NODES,
         max_encoded_bytes: int = DEFAULT_MAX_ENCODED_BYTES,
@@ -164,6 +179,17 @@ class OpeningReadService:
             raise BudgetExceeded(
                 "max_encoded_bytes must be between 1024 and "
                 f"{HARD_MAX_ENCODED_BYTES}"
+            )
+
+        if self.graph_mode:
+            return self._graph_neighborhood(
+                started=started,
+                anchor_node_id=anchor_node_id,
+                anchor_state_id=anchor_state_id,
+                target_forward_depth=target_forward_depth,
+                max_nodes=max_nodes,
+                max_encoded_bytes=max_encoded_bytes,
+                query_filter=query_filter,
             )
 
         anchor = self._node(anchor_node_id)
@@ -405,6 +431,295 @@ class OpeningReadService:
         )
         return response
 
+    def _graph_neighborhood(
+        self,
+        *,
+        started,
+        anchor_node_id,
+        anchor_state_id,
+        target_forward_depth,
+        max_nodes,
+        max_encoded_bytes,
+        query_filter,
+    ):
+        """Return a cycle-safe, state-qualified graph neighborhood."""
+        if anchor_state_id is None:
+            if anchor_node_id != self.index.root_position_id:
+                raise InvalidNodeId("non-root graph requests require anchor_state_id")
+            anchor_state_id = self.index.root_state_id
+        try:
+            anchor_state = self.index.state_structure(anchor_state_id)
+            anchor_position = self.index.position_structure(anchor_node_id)
+        except KeyError as error:
+            raise InvalidNodeId(f"invalid graph anchor: {error.args[0]!r}") from error
+        if anchor_state["node_id"] != anchor_position["id"]:
+            raise InvalidNodeId(
+                f"state {anchor_state_id} does not belong to node {anchor_node_id}"
+            )
+
+        selected = self.index.selected_games(query_filter)
+        states = {anchor_state_id: anchor_state}
+        nodes = {anchor_node_id: anchor_position}
+        depths = {anchor_state_id: 0}
+        edges = {}
+        frontiers = set()
+        expanded_parents = []
+        expanded_edges = {}
+        queue = [anchor_state_id]
+        visited_states = 0
+        budget_exception = False
+
+        while queue:
+            parent_state_id = queue.pop(0)
+            parent_depth = depths[parent_state_id]
+            visited_states += 1
+            outgoing = self.index.outgoing_edges(parent_state_id)
+            if parent_depth >= target_forward_depth:
+                if outgoing:
+                    frontiers.add(parent_state_id)
+                continue
+            new_state_ids = {
+                edge["child_state_id"]
+                for edge in outgoing
+                if edge["child_state_id"] not in states
+            }
+            if len(states) + len(new_state_ids) > max_nodes:
+                if parent_state_id == anchor_state_id:
+                    raise BudgetExceeded(
+                        "the anchor's atomic graph neighborhood exceeds max_nodes"
+                    )
+                frontiers.add(parent_state_id)
+                budget_exception = True
+                continue
+            expanded_parents.append(parent_state_id)
+            expanded_edges[parent_state_id] = tuple(edge["id"] for edge in outgoing)
+            for edge in outgoing:
+                edges[edge["id"]] = edge
+                child_state_id = edge["child_state_id"]
+                child_node_id = edge["child_id"]
+                if child_node_id not in nodes:
+                    nodes[child_node_id] = self.index.position_structure(child_node_id)
+                if child_state_id not in states:
+                    states[child_state_id] = self.index.state_structure(child_state_id)
+                    depths[child_state_id] = parent_depth + 1
+                    queue.append(child_state_id)
+
+        game_cache = {}
+
+        def result_counts(ordinals, wins=0, draws=0, losses=0):
+            if selected is None:
+                return {
+                    name: count
+                    for name, count in (("draw", draws), ("loss", losses), ("win", wins))
+                    if count
+                }
+            counts = {}
+            draw_codes = {
+                "50move",
+                "agreed",
+                "insufficient",
+                "repetition",
+                "stalemate",
+                "timevsinsufficient",
+                "timevsinsufficientmaterial",
+            }
+            for ordinal in ordinals:
+                metadata = game_cache.get(ordinal)
+                if metadata is None:
+                    metadata = self.index.game(ordinal)
+                    game_cache[ordinal] = metadata
+                result = (
+                    "win"
+                    if metadata["white_result"] == "win"
+                    else "draw"
+                    if metadata["white_result"] in draw_codes
+                    or metadata["black_result"] in draw_codes
+                    else "loss"
+                )
+                counts[result] = counts.get(result, 0) + 1
+            return dict(sorted(counts.items()))
+
+        node_overlays = {}
+        for node_id, node in nodes.items():
+            support = (
+                node["support"]
+                if selected is None
+                else len(self.index.matching_position_games(node_id, selected))
+            )
+            node_overlays[str(node_id)] = {"support": support}
+
+        state_overlays = {}
+        for state_id, state in states.items():
+            if selected is None:
+                matches = ()
+                support = state["_game_count"]
+                actual_ending_count = state["_ending_count"]
+                sole_game_ordinal = (
+                    self.index._membership(state["_game_start"], 1).value(0)
+                    if support == 1
+                    else None
+                )
+            else:
+                matches = self.index.matching_state_games(state_id, selected)
+                ending_matches = self.index.matching_ending_games(state_id, selected)
+                support = len(matches)
+                actual_ending_count = len(ending_matches)
+                sole_game_ordinal = matches[0] if support == 1 else None
+            state_overlays[str(state_id)] = {
+                "actual_ending_count": actual_ending_count,
+                "results": result_counts(
+                    matches, state["_wins"], state["_draws"], state["_losses"]
+                ),
+                "sole_game_ordinal": sole_game_ordinal,
+                "support": support,
+            }
+
+        edge_overlays = {}
+        for edge_id, edge in edges.items():
+            if selected is None:
+                matches = ()
+                support = edge["_game_count"]
+                sole_game_ordinal = (
+                    self.index._membership(edge["_game_start"], 1).value(0)
+                    if support == 1
+                    else None
+                )
+            else:
+                matches = self.index.matching_edge_games(edge_id, selected)
+                support = len(matches)
+                sole_game_ordinal = matches[0] if support == 1 else None
+            edge_overlays[str(edge_id)] = {
+                "results": result_counts(
+                    matches, edge["_wins"], edge["_draws"], edge["_losses"]
+                ),
+                "sole_game_ordinal": sole_game_ordinal,
+                "support": support,
+            }
+
+        def assemble(parent_limit):
+            included_states = {anchor_state_id}
+            included_edges = set()
+            included_parents = set()
+            for parent_state_id in expanded_parents[:parent_limit]:
+                if parent_state_id not in included_states:
+                    continue
+                included_parents.add(parent_state_id)
+                for edge_id in expanded_edges[parent_state_id]:
+                    included_edges.add(edge_id)
+                    included_states.add(edges[edge_id]["child_state_id"])
+            included_nodes = {states[state_id]["node_id"] for state_id in included_states}
+            response_frontiers = set(frontiers) & included_states
+            for state_id in included_states:
+                if states[state_id]["outgoing_count"] and state_id not in included_parents:
+                    response_frontiers.add(state_id)
+            return {
+                "anchor_node_id": anchor_node_id,
+                "anchor_state_id": anchor_state_id,
+                "dataset_version": self.dataset_version,
+                "edge_overlays": {
+                    str(edge_id): edge_overlays[str(edge_id)]
+                    for edge_id in sorted(included_edges)
+                },
+                "edges": [
+                    {
+                        key: value
+                        for key, value in edges[edge_id].items()
+                        if not key.startswith("_")
+                    }
+                    for edge_id in sorted(included_edges)
+                ],
+                "filter": (
+                    None
+                    if query_filter is None
+                    else {
+                        "black_username": query_filter.black_username,
+                        "white_username": query_filter.white_username,
+                    }
+                ),
+                "frontiers": [
+                    {
+                        "has_more": True,
+                        "node_id": states[state_id]["node_id"],
+                        "reason": (
+                            "target_depth"
+                            if depths[state_id] >= target_forward_depth
+                            else "budget"
+                        ),
+                        "state_id": state_id,
+                    }
+                    for state_id in sorted(response_frontiers)
+                ],
+                "node_overlays": {
+                    str(node_id): node_overlays[str(node_id)]
+                    for node_id in sorted(included_nodes)
+                },
+                "nodes": [
+                    {
+                        key: value
+                        for key, value in nodes[node_id].items()
+                        if not key.startswith("_")
+                    }
+                    for node_id in sorted(included_nodes)
+                ],
+                "state_overlays": {
+                    str(state_id): state_overlays[str(state_id)]
+                    for state_id in sorted(included_states)
+                },
+                "states": [
+                    {
+                        key: value
+                        for key, value in states[state_id].items()
+                        if not key.startswith("_")
+                    }
+                    for state_id in sorted(included_states)
+                ],
+                "target_forward_depth": target_forward_depth,
+            }
+
+        response = assemble(len(expanded_parents))
+        encoded_bytes = len(json.dumps(response, separators=(",", ":"), sort_keys=True).encode())
+        response_budget = max(0, max_encoded_bytes - 768)
+        if encoded_bytes > response_budget:
+            required_parents = 1 if expanded_parents and expanded_parents[0] == anchor_state_id else 0
+            required_response = assemble(required_parents)
+            required_bytes = len(
+                json.dumps(required_response, separators=(",", ":"), sort_keys=True).encode()
+            )
+            if required_bytes > response_budget:
+                raise BudgetExceeded(
+                    "the anchor's atomic graph neighborhood exceeds max_encoded_bytes"
+                )
+            low = required_parents
+            high = len(expanded_parents)
+            response = required_response
+            encoded_bytes = required_bytes
+            budget_exception = True
+            while low <= high:
+                middle = (low + high) // 2
+                candidate = assemble(middle)
+                candidate_bytes = len(
+                    json.dumps(candidate, separators=(",", ":"), sort_keys=True).encode()
+                )
+                if candidate_bytes <= response_budget:
+                    response = candidate
+                    encoded_bytes = candidate_bytes
+                    low = middle + 1
+                else:
+                    high = middle - 1
+        response["instrumentation"] = {
+            "budget_exception": budget_exception,
+            "elapsed_microseconds": (time.perf_counter_ns() - started) // 1_000,
+            "encoded_bytes": 0,
+            "returned_edges": len(response["edges"]),
+            "returned_nodes": len(response["nodes"]),
+            "returned_states": len(response["states"]),
+            "visited_nodes": visited_states,
+        }
+        response["instrumentation"]["encoded_bytes"] = len(
+            json.dumps(response, separators=(",", ":"), sort_keys=True).encode()
+        )
+        return response
+
     def game_examples(
         self,
         *,
@@ -414,6 +729,10 @@ class OpeningReadService:
         query_filter: QueryFilter | None = None,
     ):
         self._require_version(dataset_version)
+        if self.graph_mode:
+            raise ValueError(
+                "node game examples are ambiguous for position graphs; use an edge id"
+            )
         if not 1 <= limit <= 20:
             raise BudgetExceeded("game example limit must be between 1 and 20")
         query_filter = self._normalize_filter(query_filter)
@@ -449,6 +768,65 @@ class OpeningReadService:
             "limit": limit,
             "node_id": node_id,
             "total_matching": len(selected),
+        }
+
+    def edge_game_examples(
+        self,
+        *,
+        dataset_version,
+        edge_id: int,
+        limit: int = 6,
+        query_filter: QueryFilter | None = None,
+    ):
+        self._require_version(dataset_version)
+        if not self.graph_mode:
+            raise ValueError("edge examples require a position-graph artifact")
+        if not 1 <= limit <= 20:
+            raise BudgetExceeded("game example limit must be between 1 and 20")
+        query_filter = self._normalize_filter(query_filter)
+        try:
+            selected = self.index.selected_games(query_filter)
+            edge = self.index._edge(edge_id)
+            edge_posting = self.index._membership(edge[5], edge[6])
+            if selected is None:
+                total_matching = edge[6]
+                examples = tuple(
+                    edge_posting.value(index)
+                    for index in range(min(limit, total_matching))
+                )
+                child_state = self.index._state(edge[1])
+                ending_posting = self.index._membership(child_state[5], child_state[6])
+                ending_set = {
+                    ending_posting.value(index)
+                    for index in range(ending_posting.count)
+                    if edge_posting.contains(ending_posting.value(index))
+                }
+                actual_ending_count = len(ending_set)
+            else:
+                matches = self.index.matching_edge_games(edge_id, selected)
+                total_matching = len(matches)
+                examples = matches[:limit]
+                ending_set = set(
+                    self.index.matching_ending_games(edge[1], selected)
+                )
+                actual_ending_count = sum(
+                    ordinal in ending_set for ordinal in matches
+                )
+        except KeyError as error:
+            raise InvalidNodeId(f"invalid edge id: {edge_id!r}") from error
+        games = []
+        for ordinal in examples:
+            metadata = self.index.game(ordinal)
+            metadata["actual_ending"] = ordinal in ending_set
+            metadata["ordinal"] = ordinal
+            games.append(metadata)
+        return {
+            "actual_ending_count": actual_ending_count,
+            "dataset_version": self.dataset_version,
+            "edge_id": edge_id,
+            "games": games,
+            "limit": limit,
+            "total_matching": total_matching,
         }
 
     def search_players(self, *, dataset_version, prefix: str, limit: int = 10):
@@ -673,6 +1051,7 @@ def create_opening_service(
         request: Request,
         node_id: int,
         dataset_version: str,
+        state_id: int | None = None,
         target_forward_depth: int = DEFAULT_TARGET_DEPTH,
         max_nodes: int = DEFAULT_MAX_NODES,
         max_encoded_bytes: int = DEFAULT_MAX_ENCODED_BYTES,
@@ -684,9 +1063,29 @@ def create_opening_service(
             reader.neighborhood(
                 dataset_version=dataset_version,
                 anchor_node_id=node_id,
+                anchor_state_id=state_id,
                 target_forward_depth=target_forward_depth,
                 max_nodes=max_nodes,
                 max_encoded_bytes=max_encoded_bytes,
+                query_filter=query_filter(white, black),
+            ),
+        )
+
+    @app.get("/api/edges/{edge_id}/games")
+    def edge_games(
+        request: Request,
+        edge_id: int,
+        dataset_version: str,
+        limit: int = 6,
+        white: str | None = None,
+        black: str | None = None,
+    ):
+        return versioned_response(
+            request,
+            reader.edge_game_examples(
+                dataset_version=dataset_version,
+                edge_id=edge_id,
+                limit=limit,
                 query_filter=query_filter(white, black),
             ),
         )

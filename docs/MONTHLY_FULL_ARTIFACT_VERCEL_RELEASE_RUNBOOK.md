@@ -11,6 +11,14 @@ This is an operational checklist, not standing authorization. Obtain explicit
 approval before every external artifact upload, Vercel environment or project
 mutation, paid resource, Production deployment, alias change, or deletion.
 
+> **Position-graph gate (September 2026).** This runbook records the proven
+> `packed-prefix-interval-v2` release path. Do not use its size assumptions,
+> node-scoped oracle cases, or upload plan for `packed-position-graph-v1`.
+> Complete the reconstruction and release gates in
+> [`OPENING_POSITION_GRAPH_REFACTOR_2026-09-01.md`](OPENING_POSITION_GRAPH_REFACTOR_2026-09-01.md),
+> measure the full graph, and explicitly revise this runbook before any graph
+> upload or deployment.
+
 Never use `data/crawler.db` at any step. Build only from a separately restored,
 checksummed, SQLite-validated snapshot. Never send an artifact, SQLite file,
 raw payload, postings corpus, or full username corpus to the browser. Never put

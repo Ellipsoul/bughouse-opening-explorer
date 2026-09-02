@@ -71,6 +71,12 @@ def main():
     metadata = json.loads(readiness["body"])
     if metadata.get("dataset_version") != args.expected_dataset_version:
         raise SystemExit("hosted readiness returned the wrong dataset version")
+    root_node_id = metadata.get("root_node_id", 0)
+    root_state_parameter = (
+        f"&state_id={metadata['root_state_id']}"
+        if "root_state_id" in metadata
+        else ""
+    )
     meta = request(
         args.base_url,
         "/api/meta",
@@ -85,8 +91,9 @@ def main():
         protection_bypass=protection_bypass,
     )
     root_path = (
-        "/api/nodes/0/neighborhood"
+        f"/api/nodes/{root_node_id}/neighborhood"
         f"?dataset_version={args.expected_dataset_version}"
+        f"{root_state_parameter}"
         "&target_forward_depth=5&max_nodes=500&max_encoded_bytes=262144"
     )
     root = request(
@@ -97,7 +104,8 @@ def main():
     )
     stale = request(
         args.base_url,
-        "/api/nodes/0/neighborhood?dataset_version=stale&max_nodes=500"
+        f"/api/nodes/{root_node_id}/neighborhood?dataset_version=stale"
+        f"{root_state_parameter}&max_nodes=500"
         "&max_encoded_bytes=262144",
         token=token,
         protection_bypass=protection_bypass,
