@@ -228,6 +228,18 @@ def test_manifest_creation_rejects_wrong_source_size_or_hash(tmp_path):
         )
 
 
+def test_manifest_creation_allows_the_compact_position_graph_name(tmp_path):
+    artifact = _write_artifact(
+        tmp_path,
+        "full-position-graph-through-202608-v2",
+        {"payload.bin": b"abcdef"},
+    )
+
+    manifest = create_transport_manifest(artifact, chunk_size=4)
+
+    assert manifest["artifact_name"] == "full-position-graph-through-202608-v2"
+
+
 @pytest.mark.parametrize(
     "artifact_name",
     ["full-post-qualification-20260802-v2-b", "unrelated-artifact"],

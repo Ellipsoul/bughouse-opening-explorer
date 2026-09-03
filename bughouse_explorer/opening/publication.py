@@ -12,8 +12,12 @@ import time
 from .packed import EDGE, NODE, UINT32, UINT64, _file_hash
 from .position_graph_packed import (
     EDGE as GRAPH_EDGE,
+    EDGE_V2 as GRAPH_EDGE_V2,
+    GAME_V2 as GRAPH_GAME_V2,
     POSITION as GRAPH_POSITION,
+    POSITION_V2 as GRAPH_POSITION_V2,
     STATE as GRAPH_STATE,
+    STATE_V2 as GRAPH_STATE_V2,
 )
 
 
@@ -22,6 +26,206 @@ class PublishedVersion:
     artifact: Path
     build_id: str
     format: str
+
+
+def _fixed_records(path, record, *, chunk_records=65_536):
+    with path.open("rb") as stream:
+        while chunk := stream.read(record.size * chunk_records):
+            if len(chunk) % record.size:
+                raise ValueError(f"partial packed record: {path.name}")
+            yield from record.iter_unpack(chunk)
+
+
+def _validate_position_graph_v2(path, manifest, phases, started):
+    """Structurally validate v2 with bounded resident memory."""
+    if manifest.get("terminal_policy") not in {
+        "full-replay-game-end-v1",
+        "last-shared-placement-plus-one-or-game-end-v1",
+    }:
+        raise ValueError("packed graph terminal policy mismatch")
+    if manifest.get("replay_policy") not in {
+        "strict-source-game-v1",
+        "skip-unreplayable-source-game-v1",
+    }:
+        raise ValueError("packed graph replay policy mismatch")
+    if manifest.get("game_metadata_semantics") != "browser-visible-chess-com-v1":
+        raise ValueError("packed graph game metadata semantics mismatch")
+    if manifest.get("membership_storage") != "shared-equal-postings-v1":
+        raise ValueError("packed graph membership storage mismatch")
+    if min(
+        manifest.get("games", 0),
+        manifest.get("positions", 0),
+        manifest.get("states", 0),
+    ) < 1:
+        raise ValueError("packed graph requires games, positions, and states")
+    if manifest["terminal_policy"].startswith("last-shared"):
+        shared_count = manifest.get("shared_positions")
+        if (
+            not isinstance(shared_count, int)
+            or not 0 <= shared_count <= manifest["positions"]
+        ):
+            raise ValueError("packed graph shared-position count mismatch")
+    for field, record, count, filename in (
+        (
+            "position_record_bytes",
+            GRAPH_POSITION_V2,
+            manifest["positions"],
+            "positions.bin",
+        ),
+        ("state_record_bytes", GRAPH_STATE_V2, manifest["states"], "states.bin"),
+        ("edge_record_bytes", GRAPH_EDGE_V2, manifest["edges"], "edges.bin"),
+        ("game_record_bytes", GRAPH_GAME_V2, manifest["games"], "games.bin"),
+    ):
+        if manifest.get(field) != record.size:
+            raise ValueError(f"packed {field.replace('_', ' ')} mismatch")
+        if (path / filename).stat().st_size != count * record.size:
+            raise ValueError(f"packed {filename} record size mismatch")
+
+    membership_bytes = (path / "memberships.bin").stat().st_size
+    if membership_bytes % UINT32.size:
+        raise ValueError("packed graph membership record size mismatch")
+    membership_count = membership_bytes // UINT32.size
+    if not 0 <= manifest["root_node_id"] < manifest["positions"]:
+        raise ValueError("packed graph root position mismatch")
+    if not 0 <= manifest["root_state_id"] < manifest["states"]:
+        raise ValueError("packed graph root state mismatch")
+
+    dictionaries = json.loads((path / "game_dictionaries.json").read_text())
+    if set(dictionaries) != {"provenance_flag_sets", "results", "sources"}:
+        raise ValueError("packed graph game dictionary shape mismatch")
+    if any(not 0 < len(dictionaries[name]) <= 256 for name in dictionaries):
+        raise ValueError("packed graph game dictionary cardinality mismatch")
+    username_count = manifest.get("usernames")
+    if not isinstance(username_count, int) or username_count < 1:
+        raise ValueError("packed graph username count mismatch")
+    if (path / "username_offsets.bin").stat().st_size != (
+        username_count + 1
+    ) * UINT32.size:
+        raise ValueError("packed graph username offset count mismatch")
+    username_size = (path / "usernames.bin").stat().st_size
+    previous = 0
+    for index, (offset,) in enumerate(
+        _fixed_records(path / "username_offsets.bin", UINT32)
+    ):
+        if offset < previous or offset > username_size:
+            raise ValueError(f"packed graph username offset mismatch: {index}")
+        previous = offset
+    if previous != username_size:
+        raise ValueError("packed graph final username offset mismatch")
+
+    strings_size = (path / "strings.bin").stat().st_size
+    for position_id, (string_start, string_length, game_start, game_count) in enumerate(
+        _fixed_records(path / "positions.bin", GRAPH_POSITION_V2)
+    ):
+        if string_start + string_length > strings_size:
+            raise ValueError(f"packed position string mismatch: {position_id}")
+        if game_start + game_count > membership_count:
+            raise ValueError(f"packed position membership mismatch: {position_id}")
+        if game_count > manifest["games"]:
+            raise ValueError(f"packed position support mismatch: {position_id}")
+
+    next_edge_id = 0
+    root_position_id = None
+    for state_id, state in enumerate(
+        _fixed_records(path / "states.bin", GRAPH_STATE_V2)
+    ):
+        (
+            position_id,
+            edge_start,
+            edge_count,
+            game_start,
+            game_count,
+            ending_start,
+            ending_count,
+            wins,
+            draws,
+            side,
+            castling_mask,
+            ep_square,
+        ) = state
+        if state_id == manifest["root_state_id"]:
+            root_position_id = position_id
+        if position_id >= manifest["positions"]:
+            raise ValueError(f"packed state position mismatch: {state_id}")
+        if edge_start + edge_count > manifest["edges"]:
+            raise ValueError(f"packed state edge range mismatch: {state_id}")
+        if edge_count:
+            if edge_start != next_edge_id:
+                raise ValueError(f"packed state edge ownership mismatch: {state_id}")
+            next_edge_id += edge_count
+        if game_start + game_count > membership_count:
+            raise ValueError(f"packed state membership mismatch: {state_id}")
+        if ending_start + ending_count > membership_count:
+            raise ValueError(f"packed state ending mismatch: {state_id}")
+        if ending_count > game_count:
+            raise ValueError(f"packed state ending support mismatch: {state_id}")
+        if wins + draws > game_count:
+            raise ValueError(f"packed state outcome count mismatch: {state_id}")
+        if side not in (0, 1) or castling_mask > 15:
+            raise ValueError(f"packed state context mismatch: {state_id}")
+        if ep_square != 255 and ep_square > 63:
+            raise ValueError(f"packed state en-passant mismatch: {state_id}")
+    if next_edge_id != manifest["edges"]:
+        raise ValueError("packed graph has unowned edges")
+    if root_position_id != manifest["root_node_id"]:
+        raise ValueError("packed graph root node/state mismatch")
+
+    for edge_id, edge in enumerate(
+        _fixed_records(path / "edges.bin", GRAPH_EDGE_V2)
+    ):
+        (
+            child_state_id,
+            _move_token,
+            label_start,
+            label_length,
+            game_start,
+            game_count,
+            wins,
+            draws,
+        ) = edge
+        if child_state_id >= manifest["states"]:
+            raise ValueError(f"packed edge child state mismatch: {edge_id}")
+        if label_start + label_length > strings_size:
+            raise ValueError(f"packed edge label mismatch: {edge_id}")
+        if game_start + game_count > membership_count:
+            raise ValueError(f"packed edge membership mismatch: {edge_id}")
+        if wins + draws > game_count:
+            raise ValueError(f"packed edge outcome count mismatch: {edge_id}")
+
+    for ordinal, game in enumerate(_fixed_records(path / "games.bin", GRAPH_GAME_V2)):
+        (
+            _uuid,
+            _url,
+            white_username_id,
+            black_username_id,
+            _white_rating,
+            _black_rating,
+            white_result_id,
+            black_result_id,
+            source_id,
+            provenance_id,
+        ) = game
+        if white_username_id >= username_count or black_username_id >= username_count:
+            raise ValueError(f"packed game username mismatch: {ordinal}")
+        if (
+            white_result_id >= len(dictionaries["results"])
+            or black_result_id >= len(dictionaries["results"])
+            or source_id >= len(dictionaries["sources"])
+            or provenance_id >= len(dictionaries["provenance_flag_sets"])
+        ):
+            raise ValueError(f"packed game dictionary mismatch: {ordinal}")
+
+    if phases is not None:
+        phases["structural_validation"] = {
+            "edges": manifest["edges"],
+            "nodes": manifest["positions"],
+            "states": manifest["states"],
+            "scaling": "streamed_position_state_edge_and_game_records",
+            "wall_ms": (time.perf_counter_ns() - started) / 1_000_000,
+        }
+    return PublishedVersion(
+        path.resolve(), manifest["build_id"], "packed-position-graph"
+    )
 
 
 def _validate_relational(path):
@@ -97,6 +301,8 @@ def _validate_artifact(path, phases=None):
             }
 
         started = time.perf_counter_ns()
+        if manifest.get("format_version") == "packed-position-graph-v2":
+            return _validate_position_graph_v2(path, manifest, phases, started)
         if manifest.get("format_version") == "packed-position-graph-v1":
             if manifest.get("terminal_policy") not in {
                 "full-replay-game-end-v1",

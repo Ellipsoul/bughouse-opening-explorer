@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import resource
 import statistics
 import time
 
@@ -67,7 +68,7 @@ def main():
 
     with OpeningReadService(args.artifact) as service:
         if not service.graph_mode:
-            parser.error("artifact must use packed-position-graph-v1")
+            parser.error("artifact must use a packed position graph format")
         metadata = service.metadata()
         root_node_id = metadata["root_node_id"]
         root_state_id = metadata["root_state_id"]
@@ -176,6 +177,7 @@ def main():
             "dataset_version": service.dataset_version,
             "format_version": metadata["format_version"],
             "mainline": trace,
+            "peak_rss_bytes": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
             "replay_policy": metadata["replay_policy"],
             "root_node_id": root_node_id,
             "root_state_id": root_state_id,

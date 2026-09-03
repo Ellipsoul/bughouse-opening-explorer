@@ -9,6 +9,7 @@ from pathlib import Path
 import struct
 import sys
 import time
+import uuid
 import zlib
 
 from .adapter import ADAPTER_POLICY_VERSION
@@ -24,9 +25,21 @@ from .position_graph import (
 
 UINT32 = struct.Struct("<I")
 UINT64 = struct.Struct("<Q")
-POSITION = struct.Struct("<QIQI")
-STATE = struct.Struct("<IQIQIQIIIIBBB")
-EDGE = struct.Struct("<II2sQIQIIII")
+POSITION_V1 = struct.Struct("<QIQI")
+STATE_V1 = struct.Struct("<IQIQIQIIIIBBB")
+EDGE_V1 = struct.Struct("<II2sQIQIIII")
+
+# v2 keeps all public IDs and semantic fields, but uses bounds proven by the
+# full v1 corpus.  Loss counts and an edge's child position are derivable.
+POSITION_V2 = struct.Struct("<IBII")
+STATE_V2 = struct.Struct("<IIBIIIHIIBBB")
+EDGE_V2 = struct.Struct("<I2sIBIIII")
+GAME_V2 = struct.Struct("<16sQIIHHBBBB")
+
+# Backwards-compatible names used by the v1 writers and validator.
+POSITION = POSITION_V1
+STATE = STATE_V1
+EDGE = EDGE_V1
 
 
 def _state_context(position_fen):
@@ -299,18 +312,41 @@ class PackedPositionGraph:
     def __init__(self, directory):
         self.directory = Path(directory)
         self.manifest = json.loads((self.directory / "manifest.json").read_text())
-        if self.manifest.get("format_version") != "packed-position-graph-v1":
+        self.format_version = self.manifest.get("format_version")
+        if self.format_version not in {
+            "packed-position-graph-v1",
+            "packed-position-graph-v2",
+        }:
             raise ValueError("not a packed position graph")
-        if self.manifest.get("position_record_bytes") != POSITION.size:
+        self._position_record = (
+            POSITION_V2
+            if self.format_version == "packed-position-graph-v2"
+            else POSITION_V1
+        )
+        self._state_record = (
+            STATE_V2
+            if self.format_version == "packed-position-graph-v2"
+            else STATE_V1
+        )
+        self._edge_record = (
+            EDGE_V2
+            if self.format_version == "packed-position-graph-v2"
+            else EDGE_V1
+        )
+        if self.manifest.get("position_record_bytes") != self._position_record.size:
             raise ValueError("position record size mismatch")
-        if self.manifest.get("state_record_bytes") != STATE.size:
+        if self.manifest.get("state_record_bytes") != self._state_record.size:
             raise ValueError("state record size mismatch")
-        if self.manifest.get("edge_record_bytes") != EDGE.size:
+        if self.manifest.get("edge_record_bytes") != self._edge_record.size:
             raise ValueError("edge record size mismatch")
         self.root_position_id = self.manifest["root_node_id"]
         self.root_state_id = self.manifest["root_state_id"]
         started = time.perf_counter_ns()
         self.posting_index = json.loads((self.directory / "postings.json").read_text())
+        if self.format_version == "packed-position-graph-v2":
+            self.game_dictionaries = json.loads(
+                (self.directory / "game_dictionaries.json").read_text()
+            )
         self.startup_profile = {
             "posting_directory_parse": {
                 "bytes": (self.directory / "postings.json").stat().st_size,
@@ -322,16 +358,20 @@ class PackedPositionGraph:
         self._streams = []
         self._maps = {}
         started = time.perf_counter_ns()
-        for name in (
+        mapped_names = [
             "positions.bin",
             "states.bin",
             "edges.bin",
             "strings.bin",
             "memberships.bin",
-            "game_offsets.bin",
             "games.bin",
             "postings.bin",
-        ):
+        ]
+        if self.format_version == "packed-position-graph-v1":
+            mapped_names.append("game_offsets.bin")
+        else:
+            mapped_names.extend(("username_offsets.bin", "usernames.bin"))
+        for name in mapped_names:
             stream = (self.directory / name).open("rb")
             self._streams.append(stream)
             self._maps[name] = (
@@ -364,19 +404,79 @@ class PackedPositionGraph:
     def _position(self, position_id):
         if not 0 <= position_id < self.manifest["positions"]:
             raise KeyError(position_id)
-        return POSITION.unpack_from(
-            self._maps["positions.bin"], position_id * POSITION.size
+        return self._position_record.unpack_from(
+            self._maps["positions.bin"], position_id * self._position_record.size
         )
 
     def _state(self, state_id):
         if not 0 <= state_id < self.manifest["states"]:
             raise KeyError(state_id)
-        return STATE.unpack_from(self._maps["states.bin"], state_id * STATE.size)
+        state = self._state_record.unpack_from(
+            self._maps["states.bin"], state_id * self._state_record.size
+        )
+        if self.format_version == "packed-position-graph-v1":
+            return state
+        (
+            position_id,
+            edge_start,
+            edge_count,
+            game_start,
+            game_count,
+            ending_start,
+            ending_count,
+            wins,
+            draws,
+            side,
+            castling_mask,
+            ep_square,
+        ) = state
+        return (
+            position_id,
+            edge_start,
+            edge_count,
+            game_start,
+            game_count,
+            ending_start,
+            ending_count,
+            wins,
+            draws,
+            game_count - wins - draws,
+            side,
+            castling_mask,
+            ep_square,
+        )
 
     def _edge(self, edge_id):
         if not 0 <= edge_id < self.manifest["edges"]:
             raise KeyError(edge_id)
-        return EDGE.unpack_from(self._maps["edges.bin"], edge_id * EDGE.size)
+        edge = self._edge_record.unpack_from(
+            self._maps["edges.bin"], edge_id * self._edge_record.size
+        )
+        if self.format_version == "packed-position-graph-v1":
+            return edge
+        (
+            child_state_id,
+            move_token,
+            label_offset,
+            label_length,
+            game_start,
+            game_count,
+            wins,
+            draws,
+        ) = edge
+        child_position_id = self._state(child_state_id)[0]
+        return (
+            child_position_id,
+            child_state_id,
+            move_token,
+            label_offset,
+            label_length,
+            game_start,
+            game_count,
+            wins,
+            draws,
+            game_count - wins - draws,
+        )
 
     def _string(self, offset, length, *, encoding="ascii"):
         return bytes(self._maps["strings.bin"][offset : offset + length]).decode(encoding)
@@ -505,6 +605,46 @@ class PackedPositionGraph:
     def game(self, ordinal):
         if not 0 <= ordinal < self.manifest["games"]:
             raise KeyError(ordinal)
+        if self.format_version == "packed-position-graph-v2":
+            (
+                uuid_bytes,
+                numeric_url,
+                white_username_id,
+                black_username_id,
+                white_rating,
+                black_rating,
+                white_result_id,
+                black_result_id,
+                source_id,
+                provenance_id,
+            ) = GAME_V2.unpack_from(
+                self._maps["games.bin"], ordinal * GAME_V2.size
+            )
+
+            def username(username_id):
+                offsets = self._maps["username_offsets.bin"]
+                start = UINT32.unpack_from(offsets, username_id * UINT32.size)[0]
+                end = UINT32.unpack_from(offsets, (username_id + 1) * UINT32.size)[0]
+                return bytes(self._maps["usernames.bin"][start:end]).decode("utf-8")
+
+            return {
+                "black_rating": None if black_rating == 0xFFFF else black_rating,
+                "black_result": self.game_dictionaries["results"][black_result_id],
+                "black_username": username(black_username_id),
+                "provenance_flags": self.game_dictionaries[
+                    "provenance_flag_sets"
+                ][provenance_id],
+                "source": self.game_dictionaries["sources"][source_id],
+                "url": (
+                    None
+                    if numeric_url == 0xFFFFFFFFFFFFFFFF
+                    else f"https://www.chess.com/game/live/{numeric_url}"
+                ),
+                "uuid": str(uuid.UUID(bytes=uuid_bytes)),
+                "white_rating": None if white_rating == 0xFFFF else white_rating,
+                "white_result": self.game_dictionaries["results"][white_result_id],
+                "white_username": username(white_username_id),
+            }
         offsets = self._maps["game_offsets.bin"]
         start = UINT64.unpack_from(offsets, ordinal * UINT64.size)[0]
         end = UINT64.unpack_from(offsets, (ordinal + 1) * UINT64.size)[0]

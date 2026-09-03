@@ -47,7 +47,9 @@ local pending a separately approved preview trial.
 ```text
 validated restored crawler snapshot (lossless raw truth copy)
         ↓
-versioned packed-position-graph-v1 artifact
+versioned packed-position-graph-v1 semantic build
+        ↓ deterministic lossless repack
+compact packed-position-graph-v2 serving artifact
         ↓
 state-qualified read-only FastAPI service
         ↓
@@ -64,6 +66,9 @@ only the data required for the current navigation.
 The transposition contract, edge cases, rehearsal measurements, and full-build
 gate are recorded in
 [`docs/OPENING_POSITION_GRAPH_REFACTOR_2026-09-01.md`](docs/OPENING_POSITION_GRAPH_REFACTOR_2026-09-01.md).
+The compact v2 layout, full-corpus reconstruction, validation, and latency
+measurements are recorded in
+[`docs/PACKED_POSITION_GRAPH_V2_RESULT_2026-09-03.md`](docs/PACKED_POSITION_GRAPH_V2_RESULT_2026-09-03.md).
 
 See [`docs/PLATFORM_ARCHITECTURE.md`](docs/PLATFORM_ARCHITECTURE.md) for the
 layer contracts, publication lifecycle, bandwidth rules, and failure

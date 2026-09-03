@@ -11,13 +11,13 @@ This is an operational checklist, not standing authorization. Obtain explicit
 approval before every external artifact upload, Vercel environment or project
 mutation, paid resource, Production deployment, alias change, or deletion.
 
-> **Position-graph gate (September 2026).** This runbook records the proven
-> `packed-prefix-interval-v2` release path. Do not use its size assumptions,
-> node-scoped oracle cases, or upload plan for `packed-position-graph-v1`.
-> Complete the reconstruction and release gates in
-> [`OPENING_POSITION_GRAPH_REFACTOR_2026-09-01.md`](OPENING_POSITION_GRAPH_REFACTOR_2026-09-01.md),
-> measure the full graph, and explicitly revise this runbook before any graph
-> upload or deployment.
+> **Position-graph gate (September 2026).** The compact
+> `packed-position-graph-v2` artifact has been reconstructed and validated
+> locally at 3,386,496,490 component bytes. Its format and measurements are in
+> [`PACKED_POSITION_GRAPH_V2_RESULT_2026-09-03.md`](PACKED_POSITION_GRAPH_V2_RESULT_2026-09-03.md).
+> No upload or deployment was performed or authorized by that reconstruction.
+> Refresh current Vercel limits and obtain the separate approvals below before
+> beginning any external release work.
 
 Never use `data/crawler.db` at any step. Build only from a separately restored,
 checksummed, SQLite-validated snapshot. Never send an artifact, SQLite file,
@@ -89,25 +89,33 @@ Record the compressed and restored hashes and rerun the SQLite integrity and
 domain-invariant checks against that restored copy. Do not substitute the live
 crawler database.
 
-Use month-specific immutable names. The following is a template; replace every
-angle-bracket value and use separate temporary directories for A and B:
+Use month-specific immutable names. First build the semantic v1 oracle from the
+checked snapshot, then deterministically repack it as the browser-serving v2
+artifact. Replace every angle-bracket value and use separate output and
+temporary directories for A and B:
 
 ```text
-.venv/bin/python scripts/build_opening_streaming.py \
+.venv/bin/python scripts/build_opening_position_graph.py \
   <restored-snapshot.db> \
-  artifacts/opening/<monthly-artifact-name>-a \
+  artifacts/opening/<monthly-v1-oracle-name>-a \
   --temporary-directory <absolute-temp-a> \
   --snapshot-sha256 <restored-snapshot-sha256> \
   --sample-modulus 1 \
   --sample-remainder 0 \
-  --result <absolute-build-a-result.json>
+  --result <absolute-v1-build-a-result.json>
+
+.venv/bin/python scripts/repack_opening_position_graph_v2.py \
+  artifacts/opening/<monthly-v1-oracle-name>-a \
+  artifacts/opening/<monthly-v2-artifact-name>-a
 ```
 
-Repeat for artifact B with a different output and temporary directory. Then:
+Repeat both commands for artifact B with different output and temporary
+directories. Preserve the v1 builds as local semantic oracles; only v2 A is an
+upload candidate. Then:
 
 1. run complete artifact validation on A and B;
 2. record every component byte count and SHA-256;
-3. run `diff -rq <artifact-a> <artifact-b>`;
+3. run `diff -rq <v2-artifact-a> <v2-artifact-b>`;
 4. confirm accepted-game, node, edge, ending, skip, and dataset-version counts;
 5. mark A as the only upload candidate and make B immutable;
 6. preserve the restored snapshot SHA-256 as the source identity.

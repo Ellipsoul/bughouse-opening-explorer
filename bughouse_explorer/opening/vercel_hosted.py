@@ -5,12 +5,14 @@ from pathlib import Path
 
 from .service import create_opening_service
 from .vercel_stage import AUTHORIZED_ARTIFACT_NAME
+from .vercel_transport import COMPACT_POSITION_GRAPH_ARTIFACT_NAME
 
 
 AUTHORIZED_HOSTED_ARTIFACT_NAMES = frozenset(
     {
         AUTHORIZED_ARTIFACT_NAME,
         "full-post-qualification-20260802-v2-a",
+        COMPACT_POSITION_GRAPH_ARTIFACT_NAME,
     }
 )
 

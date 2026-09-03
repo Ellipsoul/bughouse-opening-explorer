@@ -11,6 +11,14 @@ the last globally shared placement plus one source edge.
 This change does not publish or deploy an artifact. Publication remains a
 separate operational decision after the full local artifact has validated.
 
+> **3 September storage amendment.** `packed-position-graph-v1` remains the
+> lossless semantic oracle and rollback format. The active local serving
+> candidate is the query-equivalent `packed-position-graph-v2` representation
+> documented in
+> [`PACKED_POSITION_GRAPH_V2_RESULT_2026-09-03.md`](PACKED_POSITION_GRAPH_V2_RESULT_2026-09-03.md).
+> The compact artifact is 3,386,496,490 component bytes. It has not been
+> uploaded or deployed.
+
 ## Semantic contract
 
 There are three distinct identities:

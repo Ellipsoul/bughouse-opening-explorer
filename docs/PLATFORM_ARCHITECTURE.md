@@ -9,14 +9,18 @@ details without collapsing these ownership boundaries.
 > **September 2026 amendment.** The ownership, publication, and bounded-read
 > boundaries in this document remain current, but its move-prefix node model is
 > now the rollback architecture. New artifacts use the transposition-aware
-> `packed-position-graph-v1` contract defined in
+> `packed-position-graph-v1` semantic contract defined in
 > [`OPENING_POSITION_GRAPH_REFACTOR_2026-09-01.md`](OPENING_POSITION_GRAPH_REFACTOR_2026-09-01.md):
 > piece placement identifies a node; side to move, castling, and en-passant
 > identify a navigation state; parent-state/token/child-state identifies an
 > edge; and the browser owns arrival history. Statements below that say exact
 > move prefix is node identity or that transpositions remain separate should be
 > read as historical evidence for `packed-prefix-interval-v2`, not as the active
-> graph contract.
+> graph contract. The serving representation is now
+> `packed-position-graph-v2`; it preserves those semantics and IDs while using
+> narrower records, shared equal postings, and browser-only Chess.com game
+> metadata. See
+> [`PACKED_POSITION_GRAPH_V2_RESULT_2026-09-03.md`](PACKED_POSITION_GRAPH_V2_RESULT_2026-09-03.md).
 
 ## Architecture at a glance
 

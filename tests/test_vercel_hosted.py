@@ -68,6 +68,29 @@ def test_vercel_app_selects_the_allowlisted_full_artifact_from_server_only_env(
     ]
 
 
+def test_vercel_app_selects_the_compact_position_graph_from_server_only_env(tmp_path):
+    calls = []
+
+    app = create_vercel_app(
+        environ={
+            "OPENING_EXPLORER_SERVICE_TOKEN": "server-secret",
+            "OPENING_EXPLORER_ARTIFACT_NAME": (
+                "full-position-graph-through-202608-v2"
+            ),
+        },
+        project_root=tmp_path,
+        factory=lambda artifact, **_options: calls.append(artifact) or "app",
+    )
+
+    assert app == "app"
+    assert calls == [
+        Path(
+            tmp_path,
+            "artifacts/opening/full-position-graph-through-202608-v2",
+        ).resolve()
+    ]
+
+
 def test_vercel_app_rejects_a_non_allowlisted_artifact_name(tmp_path):
     with pytest.raises(RuntimeError, match="ARTIFACT_NAME"):
         create_vercel_app(

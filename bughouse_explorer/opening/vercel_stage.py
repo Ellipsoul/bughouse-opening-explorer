@@ -6,19 +6,25 @@ from pathlib import Path
 import shutil
 
 from .publication import validate_artifact
-from .vercel_transport import validate_transport_manifest
+from .vercel_transport import (
+    COMPACT_POSITION_GRAPH_ARTIFACT_NAME,
+    validate_transport_manifest,
+)
 
 
 AUTHORIZED_ARTIFACT_NAME = "representative-mod71-v2-a"
 PROBE_SOURCE_FILES = (
     "api/compatibility_probe.py",
     "bughouse_explorer/__init__.py",
+    "bughouse_explorer/engine.py",
     "bughouse_explorer/tcn.py",
     "bughouse_explorer/opening/__init__.py",
     "bughouse_explorer/opening/adapter.py",
     "bughouse_explorer/opening/function_probe.py",
     "bughouse_explorer/opening/model.py",
     "bughouse_explorer/opening/packed.py",
+    "bughouse_explorer/opening/position_graph.py",
+    "bughouse_explorer/opening/position_graph_packed.py",
     "bughouse_explorer/opening/publication.py",
     "bughouse_explorer/opening/trie.py",
     "vercel.probe.json",
@@ -26,11 +32,14 @@ PROBE_SOURCE_FILES = (
 SERVICE_SOURCE_FILES = (
     "api/opening_service.py",
     "bughouse_explorer/__init__.py",
+    "bughouse_explorer/engine.py",
     "bughouse_explorer/tcn.py",
     "bughouse_explorer/opening/__init__.py",
     "bughouse_explorer/opening/adapter.py",
     "bughouse_explorer/opening/model.py",
     "bughouse_explorer/opening/packed.py",
+    "bughouse_explorer/opening/position_graph.py",
+    "bughouse_explorer/opening/position_graph_packed.py",
     "bughouse_explorer/opening/publication.py",
     "bughouse_explorer/opening/service.py",
     "bughouse_explorer/opening/trie.py",
@@ -196,6 +205,7 @@ def stage_large_preview_bundle(
     if artifact_name not in {
         AUTHORIZED_ARTIFACT_NAME,
         "full-post-qualification-20260802-v2-a",
+        COMPACT_POSITION_GRAPH_ARTIFACT_NAME,
     }:
         raise ValueError(f"large preview artifact is not authorized: {artifact_name}")
     if destination.exists():
