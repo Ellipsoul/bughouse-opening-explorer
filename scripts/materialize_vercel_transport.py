@@ -15,6 +15,7 @@ def main():
     parser.add_argument("chunks", type=Path)
     parser.add_argument("destination", type=Path)
     parser.add_argument("--minimum-free-headroom-bytes", type=int)
+    parser.add_argument("--runtime-attestation", type=Path)
     args = parser.parse_args()
     manifest = json.loads(args.manifest.read_text())
     required_free = (
@@ -27,7 +28,17 @@ def main():
         raise SystemExit(
             f"insufficient materialization headroom: {free_before} < {required_free}"
         )
-    artifact = reconstruct_transport(manifest, args.chunks, args.destination)
+    artifact = reconstruct_transport(
+        manifest,
+        args.chunks,
+        args.destination,
+        runtime_attestation=args.runtime_attestation,
+    )
+    runtime_attestation = (
+        json.loads(args.runtime_attestation.read_text())
+        if args.runtime_attestation is not None
+        else None
+    )
     print(
         json.dumps(
             {
@@ -36,7 +47,18 @@ def main():
                 "free_bytes_before": free_before,
                 "minimum_free_headroom_bytes": required_free,
                 "reconstructed_bytes": manifest["source_bytes"],
+                **(
+                    {
+                        "runtime_attestation": args.runtime_attestation.as_posix(),
+                        "runtime_attestation_id": runtime_attestation[
+                            "attestation_id"
+                        ],
+                    }
+                    if runtime_attestation is not None
+                    else {}
+                ),
                 "status": "validated",
+                "transport_manifest_id": manifest["manifest_id"],
             },
             sort_keys=True,
         )

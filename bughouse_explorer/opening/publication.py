@@ -1,10 +1,11 @@
 """Validated atomic publication pointer for immutable index versions."""
 
 from dataclasses import dataclass
+import hashlib
 import json
 import mmap
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import sqlite3
 import tempfile
 import time
@@ -28,6 +29,34 @@ class PublishedVersion:
     format: str
 
 
+RUNTIME_ATTESTATION_FILENAME = "opening-artifact-attestation.json"
+RUNTIME_ATTESTATION_FORMAT = "opening-artifact-runtime-attestation-v1"
+
+
+def _canonical_json(value):
+    return json.dumps(value, separators=(",", ":"), sort_keys=True).encode()
+
+
+def _is_sha256(value):
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _safe_component_name(name):
+    if not isinstance(name, str):
+        return False
+    candidate = PurePosixPath(name)
+    return (
+        candidate.as_posix() == name
+        and not candidate.is_absolute()
+        and len(candidate.parts) == 1
+        and name not in {"", ".", "..", "manifest.json"}
+    )
+
+
 def _fixed_records(path, record, *, chunk_records=65_536):
     with path.open("rb") as stream:
         while chunk := stream.read(record.size * chunk_records):
@@ -36,8 +65,8 @@ def _fixed_records(path, record, *, chunk_records=65_536):
             yield from record.iter_unpack(chunk)
 
 
-def _validate_position_graph_v2(path, manifest, phases, started):
-    """Structurally validate v2 with bounded resident memory."""
+def _validate_position_graph_v2_envelope(path, manifest):
+    """Validate v2 metadata and fixed-width file boundaries without scanning rows."""
     if manifest.get("terminal_policy") not in {
         "full-replay-game-end-v1",
         "last-shared-placement-plus-one-or-game-end-v1",
@@ -103,6 +132,14 @@ def _validate_position_graph_v2(path, manifest, phases, started):
     ) * UINT32.size:
         raise ValueError("packed graph username offset count mismatch")
     username_size = (path / "usernames.bin").stat().st_size
+    return membership_count, dictionaries, username_count, username_size
+
+
+def _validate_position_graph_v2(path, manifest, phases, started):
+    """Structurally validate v2 with bounded resident memory."""
+    membership_count, dictionaries, username_count, username_size = (
+        _validate_position_graph_v2_envelope(path, manifest)
+    )
     previous = 0
     for index, (offset,) in enumerate(
         _fixed_records(path / "username_offsets.bin", UINT32)
@@ -557,6 +594,254 @@ def validate_artifact_profiled(path):
     """Validate a packed artifact and return low-cardinality phase metrics."""
     phases = {}
     version = _validate_artifact(path, phases)
+    return version, phases
+
+
+def write_runtime_attestation(
+    artifact,
+    destination,
+    *,
+    validated,
+    transport_manifest_id=None,
+):
+    """Record a small runtime boundary after the caller completes full validation.
+
+    The attestation deliberately lives outside the immutable artifact directory so
+    the artifact's exact component allowlist remains unchanged.  Runtime startup
+    trusts this build-produced statement, hashes only the small artifact manifest,
+    and verifies component sizes before opening memory maps.
+    """
+    artifact = Path(artifact).resolve()
+    destination = Path(destination)
+    if validated.artifact != artifact:
+        raise ValueError("runtime attestation does not match validated artifact")
+    manifest_path = artifact / "manifest.json"
+    manifest_bytes = manifest_path.read_bytes()
+    manifest = json.loads(manifest_bytes)
+    if manifest.get("build_id") != validated.build_id:
+        raise ValueError("runtime attestation build id mismatch")
+    if transport_manifest_id is not None and not _is_sha256(transport_manifest_id):
+        raise ValueError("runtime attestation transport manifest id mismatch")
+    components = manifest.get("files")
+    if not isinstance(components, dict) or not components:
+        raise ValueError("runtime attestation requires artifact components")
+    body = {
+        "artifact_name": artifact.name,
+        "build_id": validated.build_id,
+        "components": components,
+        "dataset_version": manifest.get("dataset_version", validated.build_id),
+        "format": RUNTIME_ATTESTATION_FORMAT,
+        "format_version": manifest.get("format_version"),
+        "manifest": {
+            "bytes": len(manifest_bytes),
+            "sha256": hashlib.sha256(manifest_bytes).hexdigest(),
+        },
+        "transport_manifest_id": transport_manifest_id,
+    }
+    payload = dict(body)
+    payload["attestation_id"] = hashlib.sha256(_canonical_json(body)).hexdigest()
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            dir=destination.parent,
+            prefix=f".{destination.name}.",
+            delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+            stream.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, destination)
+    finally:
+        if temporary is not None and temporary.exists():
+            temporary.unlink()
+    return payload
+
+
+def _validate_runtime_structure(path, manifest):
+    """Check constant-size structural boundaries attested by the build."""
+    format_version = manifest.get("format_version")
+    if format_version == "packed-position-graph-v2":
+        _membership_count, _dictionaries, _username_count, username_size = (
+            _validate_position_graph_v2_envelope(path, manifest)
+        )
+        offsets_path = path / "username_offsets.bin"
+        with offsets_path.open("rb") as stream:
+            first_offset = UINT32.unpack(stream.read(UINT32.size))[0]
+            stream.seek(-UINT32.size, os.SEEK_END)
+            final_offset = UINT32.unpack(stream.read(UINT32.size))[0]
+        if first_offset != 0 or final_offset != username_size:
+            raise ValueError("packed graph username offset boundary mismatch")
+        with (path / "states.bin").open("rb") as stream:
+            stream.seek(manifest["root_state_id"] * GRAPH_STATE_V2.size)
+            root_state = GRAPH_STATE_V2.unpack(stream.read(GRAPH_STATE_V2.size))
+        if root_state[0] != manifest["root_node_id"]:
+            raise ValueError("packed graph root node/state mismatch")
+        return PublishedVersion(
+            path.resolve(), manifest["build_id"], "packed-position-graph"
+        )
+
+    if format_version == "packed-position-graph-v1":
+        if min(
+            manifest.get("games", 0),
+            manifest.get("positions", 0),
+            manifest.get("states", 0),
+        ) < 1:
+            raise ValueError("packed graph requires games, positions, and states")
+        for field, record, count, filename in (
+            ("position_record_bytes", GRAPH_POSITION, manifest["positions"], "positions.bin"),
+            ("state_record_bytes", GRAPH_STATE, manifest["states"], "states.bin"),
+            ("edge_record_bytes", GRAPH_EDGE, manifest["edges"], "edges.bin"),
+        ):
+            if manifest.get(field) != record.size:
+                raise ValueError(f"packed {field.replace('_', ' ')} mismatch")
+            if (path / filename).stat().st_size != count * record.size:
+                raise ValueError(f"packed {filename} record size mismatch")
+        if (path / "memberships.bin").stat().st_size % UINT32.size:
+            raise ValueError("packed graph membership record size mismatch")
+        if (path / "game_offsets.bin").stat().st_size != (
+            manifest["games"] + 1
+        ) * UINT64.size:
+            raise ValueError("packed graph game offset count mismatch")
+        if not 0 <= manifest["root_node_id"] < manifest["positions"]:
+            raise ValueError("packed graph root position mismatch")
+        if not 0 <= manifest["root_state_id"] < manifest["states"]:
+            raise ValueError("packed graph root state mismatch")
+        with (path / "states.bin").open("rb") as stream:
+            stream.seek(manifest["root_state_id"] * GRAPH_STATE.size)
+            root_state = GRAPH_STATE.unpack(stream.read(GRAPH_STATE.size))
+        if root_state[0] != manifest["root_node_id"]:
+            raise ValueError("packed graph root node/state mismatch")
+        return PublishedVersion(
+            path.resolve(), manifest["build_id"], "packed-position-graph"
+        )
+
+    postings = manifest.get("postings")
+    if format_version not in {
+        "packed-prefix-interval-v1",
+        "packed-prefix-interval-v2",
+    } or postings not in {"sorted", "bitmap"}:
+        raise ValueError("runtime attestation requires a packed opening artifact")
+    if min(manifest.get("games", 0), manifest.get("nodes", 0)) < 1:
+        raise ValueError("packed index requires games and nodes")
+    if manifest.get("node_record_bytes") != NODE.size:
+        raise ValueError("packed node record size mismatch")
+    if manifest.get("edge_record_bytes") != EDGE.size:
+        raise ValueError("packed edge record size mismatch")
+    if (path / "nodes.bin").stat().st_size != manifest["nodes"] * NODE.size:
+        raise ValueError("packed node record size mismatch")
+    if (path / "edges.bin").stat().st_size != manifest["edges"] * EDGE.size:
+        raise ValueError("packed edge record size mismatch")
+    with (path / "nodes.bin").open("rb") as stream:
+        root = NODE.unpack(stream.read(NODE.size))
+    if root[2:4] != (0, manifest["games"]):
+        raise ValueError("packed root interval mismatch")
+    return PublishedVersion(path.resolve(), manifest["build_id"], f"packed-{postings}")
+
+
+def validate_runtime_artifact_profiled(path, attestation_path):
+    """Validate a build-attested immutable artifact without corpus-sized scans."""
+    path = Path(path).resolve()
+    attestation_path = Path(attestation_path)
+    phases = {}
+
+    started = time.perf_counter_ns()
+    attestation = json.loads(attestation_path.read_text())
+    expected_keys = {
+        "artifact_name",
+        "attestation_id",
+        "build_id",
+        "components",
+        "dataset_version",
+        "format",
+        "format_version",
+        "manifest",
+        "transport_manifest_id",
+    }
+    if set(attestation) != expected_keys:
+        raise ValueError("runtime attestation shape mismatch")
+    if attestation.get("format") != RUNTIME_ATTESTATION_FORMAT:
+        raise ValueError("runtime attestation format mismatch")
+    transport_manifest_id = attestation.get("transport_manifest_id")
+    if transport_manifest_id is not None and not _is_sha256(transport_manifest_id):
+        raise ValueError("runtime attestation transport manifest id mismatch")
+    body = {key: value for key, value in attestation.items() if key != "attestation_id"}
+    if attestation.get("attestation_id") != hashlib.sha256(
+        _canonical_json(body)
+    ).hexdigest():
+        raise ValueError("runtime attestation id mismatch")
+    if attestation.get("artifact_name") != path.name:
+        raise ValueError("runtime attestation artifact mismatch")
+    phases["attestation_parse"] = {
+        "bytes": attestation_path.stat().st_size,
+        "scaling": "constant",
+        "wall_ms": (time.perf_counter_ns() - started) / 1_000_000,
+    }
+
+    started = time.perf_counter_ns()
+    manifest_path = path / "manifest.json"
+    manifest_bytes = manifest_path.read_bytes()
+    expected_manifest = attestation.get("manifest")
+    if not isinstance(expected_manifest, dict) or set(expected_manifest) != {
+        "bytes",
+        "sha256",
+    }:
+        raise ValueError("runtime attestation manifest shape mismatch")
+    if len(manifest_bytes) != expected_manifest.get("bytes") or hashlib.sha256(
+        manifest_bytes
+    ).hexdigest() != expected_manifest.get("sha256"):
+        raise ValueError("runtime attestation manifest mismatch")
+    manifest = json.loads(manifest_bytes)
+    if (
+        manifest.get("build_id") != attestation.get("build_id")
+        or manifest.get("dataset_version", manifest.get("build_id"))
+        != attestation.get("dataset_version")
+        or manifest.get("format_version") != attestation.get("format_version")
+        or manifest.get("files") != attestation.get("components")
+    ):
+        raise ValueError("runtime attestation metadata mismatch")
+    phases["manifest_attestation"] = {
+        "bytes": len(manifest_bytes),
+        "scaling": "manifest_bytes",
+        "wall_ms": (time.perf_counter_ns() - started) / 1_000_000,
+    }
+
+    started = time.perf_counter_ns()
+    components = manifest.get("files")
+    if (
+        not isinstance(components, dict)
+        or not components
+        or not all(_safe_component_name(name) for name in components)
+    ):
+        raise ValueError("runtime artifact component allowlist mismatch")
+    actual_files = {
+        candidate.name for candidate in path.iterdir() if candidate.is_file()
+    }
+    if actual_files != {*components, "manifest.json"}:
+        raise ValueError("runtime artifact component allowlist mismatch")
+    for name, expected in components.items():
+        if (
+            not isinstance(expected, dict)
+            or set(expected) != {"bytes", "sha256"}
+            or not isinstance(expected.get("bytes"), int)
+            or expected["bytes"] < 0
+            or not _is_sha256(expected.get("sha256"))
+            or (path / name).stat().st_size != expected["bytes"]
+        ):
+            raise ValueError(f"runtime artifact component mismatch: {name}")
+    phases["component_stat"] = {
+        "files": len(components),
+        "scaling": "file_count",
+        "wall_ms": (time.perf_counter_ns() - started) / 1_000_000,
+    }
+
+    started = time.perf_counter_ns()
+    version = _validate_runtime_structure(path, manifest)
+    phases["structural_envelope"] = {
+        "scaling": "constant",
+        "wall_ms": (time.perf_counter_ns() - started) / 1_000_000,
+    }
     return version, phases
 
 

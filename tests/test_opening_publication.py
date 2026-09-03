@@ -1,15 +1,21 @@
 import hashlib
 from dataclasses import replace
+from unittest.mock import patch
 import pytest
 
 from bughouse_explorer.opening.packed import build_packed_index
+from bughouse_explorer.opening.position_graph_packed import build_packed_position_graph
+from bughouse_explorer.opening.position_graph_v2 import repack_position_graph_v2
 from bughouse_explorer.opening.publication import (
     current_version,
     publish_version,
     remove_version,
+    validate_artifact,
+    validate_runtime_artifact_profiled,
+    write_runtime_attestation,
 )
 from bughouse_explorer.opening.relational import build_relational_index
-from opening_fixtures import D4, D5, NF3, corpus
+from opening_fixtures import D4, D5, NF3, corpus, game
 
 
 def _sha256(path):
@@ -113,3 +119,85 @@ def test_packed_publication_rejects_a_corrupted_candidate(tmp_path):
 
     with pytest.raises(ValueError, match="hash|size"):
         publish_version(artifact, pointer)
+
+
+def test_runtime_attestation_uses_only_manifest_and_file_count_scaled_checks(tmp_path):
+    source = tmp_path / "graph-v1"
+    artifact = tmp_path / "graph-v2"
+    build_packed_position_graph(
+        [
+            replace(
+                game("a", (D4, D5, NF3)),
+                uuid="00000000-0000-4000-8000-00000000000a",
+                url="https://www.chess.com/game/live/1001",
+            )
+        ],
+        source,
+        source_fingerprint="runtime-attestation-fixture-v1",
+    )
+    repack_position_graph_v2(source, artifact)
+    validated = validate_artifact(artifact)
+    attestation = tmp_path / "opening-artifact-attestation.json"
+    write_runtime_attestation(
+        artifact,
+        attestation,
+        validated=validated,
+        transport_manifest_id="a" * 64,
+    )
+
+    with patch(
+        "bughouse_explorer.opening.publication._file_hash",
+        side_effect=AssertionError("runtime validation must not hash large components"),
+    ):
+        runtime_version, phases = validate_runtime_artifact_profiled(
+            artifact,
+            attestation,
+        )
+
+    assert runtime_version == validated
+    assert list(phases) == [
+        "attestation_parse",
+        "manifest_attestation",
+        "component_stat",
+        "structural_envelope",
+    ]
+    assert phases["manifest_attestation"]["scaling"] == "manifest_bytes"
+    assert phases["component_stat"]["scaling"] == "file_count"
+    assert phases["structural_envelope"]["scaling"] == "constant"
+
+
+def test_runtime_attestation_rejects_a_changed_artifact_manifest(tmp_path):
+    artifact = tmp_path / "packed-v1"
+    build_packed_index(
+        corpus(), artifact, source_fingerprint="attested-manifest-v1", postings="sorted"
+    )
+    attestation = tmp_path / "opening-artifact-attestation.json"
+    write_runtime_attestation(
+        artifact,
+        attestation,
+        validated=validate_artifact(artifact),
+    )
+    (artifact / "manifest.json").write_text(
+        (artifact / "manifest.json").read_text() + "\n"
+    )
+
+    with pytest.raises(ValueError, match="attestation manifest mismatch"):
+        validate_runtime_artifact_profiled(artifact, attestation)
+
+
+def test_runtime_attestation_rejects_a_changed_component_size(tmp_path):
+    artifact = tmp_path / "packed-v1"
+    build_packed_index(
+        corpus(), artifact, source_fingerprint="attested-size-v1", postings="sorted"
+    )
+    attestation = tmp_path / "opening-artifact-attestation.json"
+    write_runtime_attestation(
+        artifact,
+        attestation,
+        validated=validate_artifact(artifact),
+    )
+    with (artifact / "edges.bin").open("ab") as stream:
+        stream.write(b"corruption")
+
+    with pytest.raises(ValueError, match="component mismatch: edges.bin"):
+        validate_runtime_artifact_profiled(artifact, attestation)

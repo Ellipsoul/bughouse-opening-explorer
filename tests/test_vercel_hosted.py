@@ -38,6 +38,10 @@ def test_vercel_app_uses_only_fixed_artifact_and_server_proxy_boundary(tmp_path)
                 "bearer_token": "server-secret",
                 "max_concurrency": 7,
                 "concurrency_wait_seconds": 0.08,
+                "runtime_attestation": Path(
+                    tmp_path,
+                    "opening-artifact-attestation.json",
+                ).resolve(),
             },
         )
     ]

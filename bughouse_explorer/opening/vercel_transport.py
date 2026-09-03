@@ -9,7 +9,7 @@ from pathlib import Path, PurePosixPath
 import shutil
 import time
 
-from .publication import validate_artifact
+from .publication import validate_artifact, write_runtime_attestation
 
 
 DEFAULT_CHUNK_SIZE = 64 * 1024 * 1024
@@ -251,6 +251,7 @@ def reconstruct_transport(
     destination,
     *,
     validate_artifact_structure=True,
+    runtime_attestation=None,
 ):
     """Reconstruct a new artifact only after every chunk passes exact validation."""
     validate_transport_manifest(manifest)
@@ -294,8 +295,20 @@ def reconstruct_transport(
                 raise ValueError(f"reconstructed component size mismatch: {component['path']}")
             if sha256.hexdigest() != component["sha256"]:
                 raise ValueError(f"reconstructed component hash mismatch: {component['path']}")
-        if validate_artifact_structure:
-            validate_artifact(destination)
+        validated = (
+            validate_artifact(destination) if validate_artifact_structure else None
+        )
+        if runtime_attestation is not None:
+            if validated is None:
+                raise ValueError(
+                    "runtime attestation requires full artifact validation"
+                )
+            write_runtime_attestation(
+                destination,
+                runtime_attestation,
+                validated=validated,
+                transport_manifest_id=manifest["manifest_id"],
+            )
     except BaseException:
         shutil.rmtree(destination)
         raise

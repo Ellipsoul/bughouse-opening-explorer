@@ -1,7 +1,12 @@
 import asyncio
+from unittest.mock import patch
 
 from bughouse_explorer.opening.adapter import AdapterOutcome
 from bughouse_explorer.opening.model import QueryFilter
+from bughouse_explorer.opening.publication import (
+    validate_artifact,
+    write_runtime_attestation,
+)
 import pytest
 
 from bughouse_explorer.opening.service import (
@@ -193,6 +198,26 @@ def test_fresh_reader_reports_separate_startup_phases_and_scaling_scopes(tmp_pat
     assert profile["total_wall_ms"] >= sum(
         phase["wall_ms"] for phase in profile["phases"].values()
     )
+
+
+def test_attested_reader_skips_full_artifact_validation_at_runtime(tmp_path):
+    artifact, _report = _artifact(tmp_path)
+    attestation = tmp_path / "opening-artifact-attestation.json"
+    write_runtime_attestation(
+        artifact,
+        attestation,
+        validated=validate_artifact(artifact),
+    )
+
+    with patch(
+        "bughouse_explorer.opening.service.validate_artifact_profiled",
+        side_effect=AssertionError("full validation belongs in the build"),
+    ), OpeningReadService(artifact, runtime_attestation=attestation) as service:
+        profile = service.startup_profile
+
+    assert "component_checksum" not in profile["phases"]
+    assert "structural_validation" not in profile["phases"]
+    assert profile["phases"]["component_stat"]["scaling"] == "file_count"
 
 
 def test_neighborhood_is_versioned_flat_budgeted_and_marks_every_frontier(tmp_path):

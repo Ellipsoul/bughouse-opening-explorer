@@ -4,6 +4,10 @@ import json
 import pytest
 
 from bughouse_explorer.opening.adapter import AdapterOutcome
+from bughouse_explorer.opening.publication import (
+    RUNTIME_ATTESTATION_FILENAME,
+    validate_runtime_artifact_profiled,
+)
 from bughouse_explorer.opening.streaming import build_streaming_packed_index
 from bughouse_explorer.opening.vercel_stage import (
     AUTHORIZED_ARTIFACT_NAME,
@@ -72,8 +76,14 @@ def test_service_stage_contains_only_api_inputs_and_authorized_artifact(tmp_path
     assert "data/crawler.db" not in staged
     assert not any(path.endswith((".db", ".sqlite", ".zst")) for path in staged)
     assert f"artifacts/opening/{AUTHORIZED_ARTIFACT_NAME}/manifest.json" in staged
+    assert RUNTIME_ATTESTATION_FILENAME in staged
     assert (destination / "vercel.json").exists()
     assert (destination / "requirements.txt").read_text() == "fastapi==0.141.1\n"
+    runtime_version, _phases = validate_runtime_artifact_profiled(
+        destination / "artifacts" / "opening" / AUTHORIZED_ARTIFACT_NAME,
+        destination / RUNTIME_ATTESTATION_FILENAME,
+    )
+    assert runtime_version.build_id == report.build_id
 
 
 def test_large_preview_stage_contains_chunks_but_not_the_reconstructed_artifact(
@@ -113,6 +123,9 @@ def test_large_preview_stage_contains_chunks_but_not_the_reconstructed_artifact(
     assert config["buildCommand"].startswith(
         "python -m scripts.materialize_vercel_transport "
     )
+    assert config["buildCommand"].endswith(
+        "--runtime-attestation opening-artifact-attestation.json"
+    )
     assert "framework" not in config
     assert "api/index.py" in staged
     assert "api/opening_service.py" not in staged
@@ -125,7 +138,9 @@ def test_large_preview_stage_contains_chunks_but_not_the_reconstructed_artifact(
     )
     assert "transport/**" in function["excludeFiles"]
     assert function["includeFiles"] == (
-        f"artifacts/opening/{AUTHORIZED_ARTIFACT_NAME}/**"
+        "{"
+        f"artifacts/opening/{AUTHORIZED_ARTIFACT_NAME}/**,"
+        "opening-artifact-attestation.json}"
     )
     assert "tool.vercel.scripts" not in (destination / "pyproject.toml").read_text()
 

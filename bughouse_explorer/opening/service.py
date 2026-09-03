@@ -14,7 +14,10 @@ import time
 from .model import QueryFilter
 from .packed import PackedIndex, UINT32
 from .position_graph_packed import PackedPositionGraph
-from .publication import validate_artifact_profiled
+from .publication import (
+    validate_artifact_profiled,
+    validate_runtime_artifact_profiled,
+)
 
 
 DEFAULT_TARGET_DEPTH = 5
@@ -43,10 +46,17 @@ class BudgetExceeded(ValueError):
 class OpeningReadService:
     """Own one validated, read-only, memory-mapped dataset version."""
 
-    def __init__(self, artifact):
+    def __init__(self, artifact, *, runtime_attestation=None):
         startup_started = time.perf_counter_ns()
         self.artifact = Path(artifact).resolve()
-        validated, phases = validate_artifact_profiled(self.artifact)
+        validated, phases = (
+            validate_artifact_profiled(self.artifact)
+            if runtime_attestation is None
+            else validate_runtime_artifact_profiled(
+                self.artifact,
+                runtime_attestation,
+            )
+        )
         self.graph_mode = validated.format == "packed-position-graph"
         if not self.graph_mode and not validated.format.startswith("packed-sorted"):
             raise ValueError("opening service requires packed sorted postings")
@@ -878,6 +888,7 @@ def create_opening_service(
     bearer_token=None,
     max_concurrency=8,
     concurrency_wait_seconds=0.05,
+    runtime_attestation=None,
 ):
     """Create a bounded HTTP app after validating the immutable artifact."""
     from fastapi import FastAPI, Query, Request
@@ -891,7 +902,10 @@ def create_opening_service(
     if bearer_token is not None and not bearer_token:
         raise ValueError("bearer_token must be non-empty when configured")
 
-    reader = OpeningReadService(artifact)
+    reader = OpeningReadService(
+        artifact,
+        runtime_attestation=runtime_attestation,
+    )
     semaphore = asyncio.Semaphore(max_concurrency)
 
     @asynccontextmanager

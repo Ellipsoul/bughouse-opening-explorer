@@ -5,7 +5,11 @@ import json
 from pathlib import Path
 import shutil
 
-from .publication import validate_artifact
+from .publication import (
+    RUNTIME_ATTESTATION_FILENAME,
+    validate_artifact,
+    write_runtime_attestation,
+)
 from .vercel_transport import (
     COMPACT_POSITION_GRAPH_ARTIFACT_NAME,
     validate_transport_manifest,
@@ -155,6 +159,11 @@ def stage_service_bundle(source_root, artifact, destination):
 
     artifact_target = destination / "artifacts" / "opening" / AUTHORIZED_ARTIFACT_NAME
     shutil.copytree(artifact, artifact_target)
+    write_runtime_attestation(
+        artifact,
+        destination / RUNTIME_ATTESTATION_FILENAME,
+        validated=validated,
+    )
     (destination / ".python-version").write_text("3.12\n")
     (destination / "requirements.txt").write_text("fastapi==0.141.1\n")
     (destination / ".vercelignore").write_text(
@@ -165,6 +174,7 @@ def stage_service_bundle(source_root, artifact, destination):
         f"!artifacts/opening/{AUTHORIZED_ARTIFACT_NAME}/**\n"
         "!bughouse_explorer\n!bughouse_explorer/**\n"
         "!.python-version\n!requirements.txt\n!vercel.json\n"
+        f"!{RUNTIME_ATTESTATION_FILENAME}\n"
         "!bundle-manifest.json\n"
     )
 
@@ -253,7 +263,9 @@ def stage_large_preview_bundle(
                     "$schema": "https://openapi.vercel.sh/vercel.json",
                     "buildCommand": (
                         "python -m scripts.materialize_vercel_transport "
-                        f"transport-manifest.json . {artifact_relative}"
+                        f"transport-manifest.json . {artifact_relative} "
+                        "--runtime-attestation "
+                        f"{RUNTIME_ATTESTATION_FILENAME}"
                     ),
                     "fluid": True,
                     "functions": {
@@ -262,7 +274,11 @@ def stage_large_preview_bundle(
                                 "{transport/**,transport-manifest.json,"
                                 "scripts/materialize_vercel_transport.py}"
                             ),
-                            "includeFiles": f"{artifact_relative}/**",
+                            "includeFiles": (
+                                "{"
+                                f"{artifact_relative}/**,{RUNTIME_ATTESTATION_FILENAME}"
+                                "}"
+                            ),
                             "maxDuration": 300,
                         }
                     },

@@ -3,6 +3,7 @@
 import os
 from pathlib import Path
 
+from .publication import RUNTIME_ATTESTATION_FILENAME
 from .service import create_opening_service
 from .vercel_stage import AUTHORIZED_ARTIFACT_NAME
 from .vercel_transport import COMPACT_POSITION_GRAPH_ARTIFACT_NAME
@@ -53,4 +54,5 @@ def create_vercel_app(*, environ=None, project_root=None, factory=create_opening
         bearer_token=token,
         max_concurrency=max_concurrency,
         concurrency_wait_seconds=wait_ms / 1_000,
+        runtime_attestation=(root / RUNTIME_ATTESTATION_FILENAME).resolve(),
     )

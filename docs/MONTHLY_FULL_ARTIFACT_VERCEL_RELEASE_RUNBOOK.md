@@ -185,8 +185,8 @@ space report. Then write chunks:
 Reconstruct offline from those chunks into a fresh destination. Verify every
 component size and SHA-256, total source/chunk/reconstructed bytes, deterministic
 ordering, exact final short parts, and complete artifact validation. Record all
-excluded paths. The transport must contain only the artifact manifest and the
-seven packed components.
+excluded paths. The transport must contain only the artifact manifest and its
+declared packed components.
 
 Stage the exact service boundary plus chunks:
 
@@ -199,6 +199,9 @@ Stage the exact service boundary plus chunks:
 
 Review `bundle-manifest.json`. It must exclude snapshots, SQLite, raw data,
 artifact B, other artifacts, credentials, journals, and repository history.
+The generated build command must write `opening-artifact-attestation.json` only
+after reconstruction and complete validation, and the Function include-files
+boundary must contain both that attestation and the reconstructed artifact.
 
 ## Phase 6 — prove journal restart before the monthly full upload
 
@@ -276,10 +279,16 @@ In the remote build log require:
 1. exact reconstructed bytes;
 2. exact dataset version;
 3. complete artifact validation status;
-4. adequate free bytes before materialization and required headroom;
-5. `enabling large functions (beta)`;
-6. transport exclusion from the final Function;
-7. expected Python runtime, memory, timeout, and region.
+4. a generated runtime attestation for the exact artifact and transport
+   manifest IDs;
+5. adequate free bytes before materialization and required headroom;
+6. `enabling large functions (beta)`;
+7. transport exclusion from the final Function;
+8. expected Python runtime, memory, timeout, and region.
+
+On the protected Preview, inspect startup instrumentation. It must report the
+attestation, manifest, component-stat, posting-directory, and memory-map phases;
+it must not repeat corpus-sized component hashing or structural row scans.
 
 Run the sanitized byte-exact oracle and the 1/8/32/64 concurrency matrix against
 the protected Preview. Run the frontend unit, integration, browser, TypeScript,
@@ -302,9 +311,11 @@ Keep the existing Sensitive `OPENING_EXPLORER_SERVICE_TOKEN`; do not replace it
 with a pulled placeholder.
 
 Treat `vercel promote` as a new Production clone and remote rebuild, not an
-atomic alias move. The clone must independently reconstruct, checksum, validate,
-and package the full artifact using Production environment scope. Capture the
-new deployment ID; it will not be the protected Preview ID.
+atomic alias move. The clone must independently reconstruct, checksum, fully
+validate, attest, and package the artifact using Production environment scope.
+Runtime cold starts then verify the small attested boundary rather than repeating
+the build's corpus-sized scans. Capture the new deployment ID; it will not be the
+protected Preview ID.
 
 After explicit Production approval:
 

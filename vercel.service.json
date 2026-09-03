@@ -5,7 +5,7 @@
       "src": "api/opening_service.py",
       "use": "@vercel/python",
       "config": {
-        "includeFiles": "artifacts/opening/representative-mod71-v2-a/**"
+        "includeFiles": "{artifacts/opening/representative-mod71-v2-a/**,opening-artifact-attestation.json}"
       }
     }
   ],

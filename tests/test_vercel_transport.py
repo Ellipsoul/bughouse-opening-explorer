@@ -6,6 +6,8 @@ import shutil
 
 import pytest
 
+from bughouse_explorer.opening.packed import build_packed_index
+from bughouse_explorer.opening.publication import validate_runtime_artifact_profiled
 from bughouse_explorer.opening.vercel_transport import (
     create_transport_manifest,
     reconstruct_transport,
@@ -15,6 +17,7 @@ from bughouse_explorer.opening.vercel_transport import (
     validate_staged_source_files,
     write_transport_chunks,
 )
+from opening_fixtures import corpus
 
 
 def _write_artifact(root, name, files, dataset_version="dataset-v1"):
@@ -106,6 +109,60 @@ def test_transport_reconstructs_every_source_file_byte_for_byte(tmp_path):
     assert {
         path.name: path.read_bytes() for path in reconstructed.iterdir()
     } == {path.name: path.read_bytes() for path in artifact.iterdir()}
+
+
+def test_fully_validated_reconstruction_writes_a_runtime_attestation(tmp_path):
+    artifact = tmp_path / "fixture-a"
+    build_packed_index(
+        corpus(),
+        artifact,
+        source_fingerprint="runtime-attestation-transport-fixture-v1",
+        postings="sorted",
+    )
+    manifest = create_transport_manifest(
+        artifact,
+        chunk_size=1024,
+        authorized_artifact_names={"fixture-a"},
+    )
+    chunks = tmp_path / "chunks"
+    write_transport_chunks(artifact, manifest, chunks)
+    attestation = tmp_path / "opening-artifact-attestation.json"
+
+    reconstructed = reconstruct_transport(
+        manifest,
+        chunks,
+        tmp_path / "reconstructed",
+        runtime_attestation=attestation,
+    )
+
+    runtime_version, _phases = validate_runtime_artifact_profiled(
+        reconstructed,
+        attestation,
+    )
+    assert runtime_version.build_id == manifest["dataset_version"]
+    assert json.loads(attestation.read_text())["transport_manifest_id"] == manifest[
+        "manifest_id"
+    ]
+
+
+def test_reconstruction_cannot_attest_when_full_validation_is_disabled(tmp_path):
+    artifact = _write_artifact(tmp_path, "fixture-a", {"payload.bin": b"abcdef"})
+    manifest = create_transport_manifest(
+        artifact,
+        chunk_size=4,
+        authorized_artifact_names={"fixture-a"},
+    )
+    chunks = tmp_path / "chunks"
+    write_transport_chunks(artifact, manifest, chunks)
+
+    with pytest.raises(ValueError, match="requires full artifact validation"):
+        reconstruct_transport(
+            manifest,
+            chunks,
+            tmp_path / "reconstructed",
+            validate_artifact_structure=False,
+            runtime_attestation=tmp_path / "opening-artifact-attestation.json",
+        )
 
 
 def test_transport_round_trips_an_empty_component(tmp_path):
