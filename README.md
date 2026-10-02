@@ -89,7 +89,24 @@ the reusable fresh-session blueprint is
 The current shared artifact contains net material, Average King Height,
 colour-aware Piece Drop Heat Maps, and bounded Material Game Highs. The newest
 full extraction and static publication evidence are in
-[`docs/PLAYER_MATERIAL_GAME_HIGHS_INSIGHTS_RESULT_2026-08-12.md`](docs/PLAYER_MATERIAL_GAME_HIGHS_INSIGHTS_RESULT_2026-08-12.md).
+[`docs/MONTHLY_DATA_AND_PLAYER_INSIGHTS_RESULT_2026-10-02.md`](docs/MONTHLY_DATA_AND_PLAYER_INSIGHTS_RESULT_2026-10-02.md).
+
+The September 2026 refresh (completed 2 October) contains 8,684,730 raw boards,
+17,369,460 participant rows, and 1,137 permanently tracked/fully crawled players
+(+196,852 boards and +56 enrollments). Its immutable schema-4 Player Insights
+artifact contains 6,899,498 accepted games, 6,899,477 analyzed games, and 21
+replay exclusions. All four projections share dataset
+`c41ea52519972b543a3cfbed54dd063c0d685b5a`.
+
+| Current projection | Raw bytes | Deterministic gzip -9 bytes |
+| --- | ---: | ---: |
+| Material | 217,427 | 59,354 |
+| King height | 858,039 | 150,342 |
+| Drop heat maps | 2,032,360 | 633,948 |
+| Material game highs | 2,475,103 | 433,944 |
+
+These are the local Player Insights inputs. The packed Opening Explorer
+artifact retains its separately recorded snapshot and release identity.
 
 ## How the crawl expands
 

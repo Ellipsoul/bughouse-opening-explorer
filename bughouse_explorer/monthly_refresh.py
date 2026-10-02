@@ -423,6 +423,10 @@ def build_player_insights_artifact(
         foreign_key_violations = sum(
             1 for _ in connection.execute("PRAGMA foreign_key_check")
         )
+        if foreign_key_violations:
+            raise ValueError(
+                f"player-insights has {foreign_key_violations} foreign-key violation(s)"
+            )
         stored_dataset_versions = connection.execute(
             "SELECT dataset_version FROM insight_builds"
         ).fetchall()

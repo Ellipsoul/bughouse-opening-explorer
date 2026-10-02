@@ -278,3 +278,40 @@ def test_player_insights_artifact_builds_once_and_stages_registered_exports(tmp_
     result = json.loads((artifact / "monthly-refresh-result.json").read_text())
     assert result["build"]["tracked_players"] == 1
     assert result["projections"][0]["filename"] == "alpha.json"
+
+
+def test_player_insights_artifact_rejects_foreign_key_violations_before_export(tmp_path):
+    snapshot = tmp_path / "snapshot.db"
+    snapshot.write_bytes(b"immutable source")
+    artifact = tmp_path / "artifact"
+    exported = []
+
+    def builder(_source, output, **_kwargs):
+        with sqlite3.connect(output) as connection:
+            connection.executescript(
+                """
+                CREATE TABLE insight_builds (dataset_version TEXT PRIMARY KEY);
+                INSERT INTO insight_builds VALUES ('dataset-1');
+                CREATE TABLE players (id INTEGER PRIMARY KEY);
+                CREATE TABLE counts (player_id INTEGER REFERENCES players(id));
+                INSERT INTO counts VALUES (99);
+                """
+            )
+        return {"dataset_version": "dataset-1"}
+
+    def exporter(_database, path, **_kwargs):
+        exported.append(path)
+        path.write_text('{}\n')
+
+    with pytest.raises(ValueError, match="1 foreign-key violation"):
+        build_player_insights_artifact(
+            snapshot,
+            hashlib.sha256(snapshot.read_bytes()).hexdigest(),
+            artifact,
+            builder=builder,
+            specs=(ProjectionSpec("alpha", "alpha.json", exporter),),
+        )
+
+    assert not exported
+    assert not (artifact / "monthly-refresh-result.json").exists()
+    assert (artifact / "player-insights.db").exists()

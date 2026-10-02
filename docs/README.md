@@ -7,7 +7,11 @@ and complete Player Insights refresh, follow
 [`MONTHLY_DATA_AND_PLAYER_INSIGHTS_RUNBOOK.md`](MONTHLY_DATA_AND_PLAYER_INSIGHTS_RUNBOOK.md).
 It is the operator entrypoint for `scripts/run_monthly_refresh.py`, interruption
 recovery, verification, new-insight registration, and rollback boundaries.
-The completed first execution is recorded in
+The latest completed refresh, for September 2026, is recorded in
+[`MONTHLY_DATA_AND_PLAYER_INSIGHTS_RESULT_2026-10-02.md`](MONTHLY_DATA_AND_PLAYER_INSIGHTS_RESULT_2026-10-02.md),
+including the 56-player enrollment ledger, terminal outcomes, immutable
+identities, projection sizes/checksums, integrity-gate repair, verification,
+and exact rollback inputs. The completed first execution is recorded in
 [`MONTHLY_DATA_AND_PLAYER_INSIGHTS_RESULT_2026-09-01.md`](MONTHLY_DATA_AND_PLAYER_INSIGHTS_RESULT_2026-09-01.md),
 including the 68-player enrollment ledger, snapshot and artifact identities,
 projection checksums, and end-to-end verification evidence.

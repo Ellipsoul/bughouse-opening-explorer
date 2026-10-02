@@ -104,6 +104,17 @@ counters and latest persisted error before resuming. Do not reinterpret an
 environmental DNS failure as a Chess.com API failure, and do not weaken the
 failure circuit breaker merely to force closure.
 
+Initial eligibility reconciliation can take several minutes before archive
+jobs are queued or the first progress line appears. A persisted `running` run
+with an initially empty queue is not closure; monitor the same process and run
+id rather than launching a duplicate. Inspect the run configuration for the
+requested year/month before deciding whether a previous run should be resumed.
+
+For a deliberately dated run or retry, carry the explicit `--year`, `--month`,
+and fresh `--run-label` into `--skip-crawl` finalization as well. Save the
+pre-crawl status and exact previous projection set outside tracked frontend
+files so interruption recovery retains the corpus baseline and rollback input.
+
 ## Bounded smoke test
 
 Use a bounded live run only when crawler behavior itself changed:
@@ -152,6 +163,11 @@ Review the result JSON first. It must reconcile snapshot identity, source and
 derived checksums, policy/analyzer/schema versions, tracked-player count,
 accepted/analyzed/excluded games, bounded anomaly reasons, artifact integrity,
 and all projection checksums.
+
+Both source and derived SQLite foreign-key checks must reject violations before
+export or publication. The derived-artifact gate is regression-tested with an
+orphan row; a rejected partial artifact remains available for diagnosis and
+must be retried under a fresh label.
 
 Backend verification:
 
