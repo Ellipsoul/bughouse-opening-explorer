@@ -31,14 +31,19 @@ def _timed_json(call, *, scaling):
     return response, measurement
 
 
-def measure_first_load(artifact):
+def measure_first_load(artifact, *, runtime_attestation=None):
     """Measure one fresh reader plus its sequential metadata/root request path."""
     artifact = Path(artifact)
     usage_before = resource.getrusage(resource.RUSAGE_SELF)
     cpu_started = time.process_time_ns()
 
-    with OpeningReadService(artifact) as service:
+    with OpeningReadService(
+        artifact, runtime_attestation=runtime_attestation
+    ) as service:
         version = service.dataset_version
+        component_bytes = sum(
+            record["bytes"] for record in service.index.manifest["files"].values()
+        )
         metadata, first_metadata = _timed_json(
             service.metadata,
             scaling="constant",
@@ -64,14 +69,25 @@ def measure_first_load(artifact):
 
     usage_after = resource.getrusage(resource.RUSAGE_SELF)
     return {
+        "artifact_component_bytes": component_bytes,
+        "validation_mode": (
+            "build_attested" if runtime_attestation is not None else "full_artifact"
+        ),
         "dataset_version": version,
         "process": {
             "cpu_ms": (time.process_time_ns() - cpu_started) / 1_000_000,
-            "input_block_bytes": max(0, usage_after.ru_inblock - usage_before.ru_inblock) * 512,
+            "input_block_bytes": max(
+                0, usage_after.ru_inblock - usage_before.ru_inblock
+            )
+            * 512,
             "major_page_faults": max(0, usage_after.ru_majflt - usage_before.ru_majflt),
-            "mapped_virtual_bytes": startup["phases"]["mmap_construction"]["mapped_bytes"],
+            "mapped_virtual_bytes": startup["phases"]["mmap_construction"][
+                "mapped_bytes"
+            ],
             "minor_page_faults": max(0, usage_after.ru_minflt - usage_before.ru_minflt),
-            "open_files": len(os.listdir("/dev/fd")) if Path("/dev/fd").is_dir() else None,
+            "open_files": (
+                len(os.listdir("/dev/fd")) if Path("/dev/fd").is_dir() else None
+            ),
             "peak_rss_bytes": _peak_rss_bytes(usage_after),
         },
         "requests": {

@@ -14,11 +14,13 @@ from .publication import validate_artifact, write_runtime_attestation
 
 DEFAULT_CHUNK_SIZE = 64 * 1024 * 1024
 COMPACT_POSITION_GRAPH_ARTIFACT_NAME = "full-position-graph-through-202608-v2"
+SEPTEMBER_CANDIDATE_ARTIFACT_NAME = "full-position-graph-through-202609-20261003-r1-v2-a"
 AUTHORIZED_TRANSPORT_ARTIFACT_NAMES = frozenset(
     {
         "representative-mod71-v2-a",
         "full-post-qualification-20260802-v2-a",
         COMPACT_POSITION_GRAPH_ARTIFACT_NAME,
+        SEPTEMBER_CANDIDATE_ARTIFACT_NAME,
     }
 )
 

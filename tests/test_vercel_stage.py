@@ -172,3 +172,22 @@ def test_large_preview_stage_rejects_a_corrupt_upload_input_chunk(tmp_path):
             chunks,
             tmp_path / "stage",
         )
+
+
+@pytest.mark.parametrize('name,allowed',[
+    ('full-position-graph-through-202609-20261003-r1-v2-a',True),
+    ('full-position-graph-through-202609-20261003-r1-v2-b',False),
+    ('incremental-position-graph-through-202609-20261003-r1-v2',False),
+])
+def test_september_stage_boundary(tmp_path,name,allowed):
+    artifact=tmp_path/name
+    build_streaming_packed_index(
+        (AdapterOutcome(source_rowid=i,game=g) for i,g in enumerate(corpus(),1)),
+        artifact,source_fingerprint='stage-boundary',temporary_directory=tmp_path/'scratch')
+    manifest=create_transport_manifest(artifact,authorized_artifact_names={name})
+    chunks=tmp_path/'chunks';write_transport_chunks(artifact,manifest,chunks)
+    def call():
+        return stage_large_preview_bundle(Path(__file__).resolve().parents[1],manifest,chunks,tmp_path/'stage')
+    if allowed: assert call()['artifact_name']==name
+    else:
+        with pytest.raises(ValueError,match='not authorized'):call()

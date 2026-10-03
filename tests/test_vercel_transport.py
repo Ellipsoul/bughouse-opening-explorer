@@ -632,3 +632,17 @@ def test_representative_artifact_reconstructs_byte_exactly(tmp_path):
         path.name: hashlib.sha256(path.read_bytes()).hexdigest()
         for path in artifact.iterdir()
     }
+
+
+@pytest.mark.parametrize('name,allowed',[
+    ('full-position-graph-through-202609-20261003-r1-v2-a',True),
+    ('full-position-graph-through-202609-20261003-r1-v2-b',False),
+    ('incremental-position-graph-through-202609-20261003-r1-v2',False),
+])
+def test_september_candidate_transport_boundary(tmp_path,name,allowed):
+    artifact=_write_artifact(tmp_path,name,{'payload.bin':b'abcd'})
+    if allowed:
+        assert create_transport_manifest(artifact,chunk_size=4)['artifact_name']==name
+    else:
+        with pytest.raises(ValueError,match='not transport-authorized'):
+            create_transport_manifest(artifact,chunk_size=4)

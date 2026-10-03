@@ -46,29 +46,26 @@ Its completed 6.5-million-game extraction, deterministic projection, static
 analysis-board renderer, and validation evidence are recorded in
 [`PLAYER_MATERIAL_GAME_HIGHS_INSIGHTS_RESULT_2026-08-12.md`](PLAYER_MATERIAL_GAME_HIGHS_INSIGHTS_RESULT_2026-08-12.md).
 
-Start with [`VERCEL_LARGE_FUNCTION_PRODUCTION_RESULT_2026-08-04.md`](VERCEL_LARGE_FUNCTION_PRODUCTION_RESULT_2026-08-04.md)
-for the completed interruption rehearsal, full upload, protected Preview,
-Production materialization, oracle, browser, cost, cleanup, and rollback
-evidence. Use
-[`MONTHLY_FULL_ARTIFACT_VERCEL_RELEASE_RUNBOOK.md`](MONTHLY_FULL_ARTIFACT_VERCEL_RELEASE_RUNBOOK.md)
-for the repeatable next-snapshot procedure and failure guardrails. Read
-[`OPENING_INCREMENTAL_REFRESH_ANALYSIS_2026-10-03.md`](OPENING_INCREMENTAL_REFRESH_ANALYSIS_2026-10-03.md)
-for the measured August-to-September source delta, older-tail repair evidence,
-and proposed durable support/owner store with unchanged packed v2 publication.
-The incremental builder is planned; the current dual-full-build release gate
-still applies. To implement and execute the next local update, use
-[`OPENING_INCREMENTAL_REFRESH_HANDOFF_2026-10-03.md`](OPENING_INCREMENTAL_REFRESH_HANDOFF_2026-10-03.md)
-and its copy-ready
-[`OPENING_INCREMENTAL_REFRESH_SESSION_PROMPT.md`](OPENING_INCREMENTAL_REFRESH_SESSION_PROMPT.md).
-They aggregate the exact sources, retained evidence, uncommitted work,
-implementation gates, release-tooling repairs, and authorization boundaries.
-Then read
-[`VERCEL_LARGE_FUNCTION_PREVIEW_PLAN_2026-08-04.md`](VERCEL_LARGE_FUNCTION_PREVIEW_PLAN_2026-08-04.md)
-for the operative contract. The earlier local transport and preflight evidence
-is in
-[`VERCEL_LARGE_FUNCTION_TRANSPORT_PREFLIGHT_RESULT_2026-08-04.md`](VERCEL_LARGE_FUNCTION_TRANSPORT_PREFLIGHT_RESULT_2026-08-04.md).
-The completed full-build evidence remains in
-[`FULL_OPENING_TREE_SCALE_UP_RESULT_2026-08-04.md`](FULL_OPENING_TREE_SCALE_UP_RESULT_2026-08-04.md).
+For recurring **Opening Explorer updates**, start with
+[`OPENING_INCREMENTAL_RUNBOOK.md`](OPENING_INCREMENTAL_RUNBOOK.md).
+The validated September local candidate and completed August-to-September proof
+are in [`OPENING_INCREMENTAL_RESULT_2026-10-03.md`](OPENING_INCREMENTAL_RESULT_2026-10-03.md).
+For its deployment, use the exact
+[`release packet`](OPENING_INCREMENTAL_RELEASE_PACKET_2026-10-03.md) and
+[`monthly release runbook`](MONTHLY_FULL_ARTIFACT_VERCEL_RELEASE_RUNBOOK.md).
+Production remains August until the separately approved cutover. Independent
+A/B full-build release validation remains required.
+
+Consult historical migration material only when investigating the design:
+[`analysis`](OPENING_INCREMENTAL_REFRESH_ANALYSIS_2026-10-03.md),
+[`handoff`](OPENING_INCREMENTAL_REFRESH_HANDOFF_2026-10-03.md), and
+[`completed session prompt`](OPENING_INCREMENTAL_REFRESH_SESSION_PROMPT.md).
+They describe work already completed, not instructions to bootstrap or implement
+again. The full session progress log and temporary probes are local ignored
+artifacts; the dated result preserves the durable conclusions and evidence.
+Older production/transport results below are reference material for the release
+runbook, not mandatory reading for every monthly update.
+
 The numbered history below supplies the underlying contracts and earlier
 evidence.
 

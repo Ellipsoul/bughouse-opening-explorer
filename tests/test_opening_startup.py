@@ -5,7 +5,9 @@ from bughouse_explorer.opening.streaming import build_streaming_packed_index
 from opening_fixtures import corpus
 
 
-def test_first_load_measurement_separates_bounded_requests_from_reader_readiness(tmp_path):
+def test_first_load_measurement_separates_bounded_requests_from_reader_readiness(
+    tmp_path,
+):
     artifact = tmp_path / "artifact"
     outcomes = (
         AdapterOutcome(source_rowid=index, game=opening_game)
@@ -21,9 +23,15 @@ def test_first_load_measurement_separates_bounded_requests_from_reader_readiness
     measurement = measure_first_load(artifact)
 
     assert measurement["dataset_version"] == report.build_id
-    assert measurement["startup"]["phases"]["component_checksum"]["scaling"] == "artifact_bytes"
+    assert (
+        measurement["startup"]["phases"]["component_checksum"]["scaling"]
+        == "artifact_bytes"
+    )
     assert measurement["requests"]["first_metadata"]["scaling"] == "constant"
-    assert measurement["requests"]["first_neighborhood"]["scaling"] == "request_budget_bounded"
+    assert (
+        measurement["requests"]["first_neighborhood"]["scaling"]
+        == "request_budget_bounded"
+    )
     assert measurement["requests"]["warm_metadata"]["encoded_bytes"] > 0
     assert measurement["requests"]["warm_neighborhood"]["returned_nodes"] <= 500
     assert measurement["requests"]["warm_neighborhood"]["encoded_bytes"] <= 256 * 1024
@@ -44,3 +52,43 @@ def test_first_load_measurement_uses_the_graph_root_state(tmp_path):
     assert measurement["dataset_version"] == build_id
     assert measurement["requests"]["first_neighborhood"]["returned_nodes"] > 0
     assert measurement["requests"]["warm_neighborhood"]["encoded_bytes"] <= 256 * 1024
+
+
+def test_fresh_process_benchmark_measures_the_attested_runtime_path(tmp_path):
+    import json, subprocess, sys
+    from bughouse_explorer.opening.publication import (
+        write_runtime_attestation,
+        validate_artifact,
+    )
+
+    artifact = tmp_path / "graph"
+    build_packed_position_graph(
+        corpus(), artifact, source_fingerprint="attested-startup"
+    )
+    attestation = tmp_path / "attestation.json"
+    write_runtime_attestation(
+        artifact, attestation, validated=validate_artifact(artifact)
+    )
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "scripts/benchmark_opening_startup.py",
+            str(artifact),
+            "--runtime-attestation",
+            str(attestation),
+            "--repeats",
+            "2",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    report = json.loads(completed.stdout)
+    assert report["validation_mode"] == "build_attested"
+    assert report["artifact_component_bytes"] > 0
+    assert report["fresh_process_repetitions"] == 2
+    phases = report["summary"]["startup"]["phases"]
+    assert phases["component_stat"]["scaling"] == "file_count"
+    assert phases["structural_envelope"]["scaling"] == "constant"
+    assert "component_checksum" not in phases
+    assert "structural_validation" not in phases

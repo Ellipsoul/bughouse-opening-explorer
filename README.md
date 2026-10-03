@@ -38,9 +38,16 @@ opening tree and the
 [`bughouse-chess`](https://github.com/Ellipsoul/bughouse-chess) viewer.
 
 The public browser receives only bounded opening-neighborhood responses; it
-never receives the raw database or packed artifact. A representative opening
-service and one-board explorer are deployed, while the full artifact remains
-local pending a separately approved preview trial.
+never receives the raw database or packed artifact. The deployed one-board
+explorer serves the full August position graph: 6,747,980 games, dataset
+`68a97678c3df093d243473e0844b373d669ac335`, as checked on 3 October 2026.
+The validated local September candidate contains 6,899,477 games and is
+3,463,810,827 bytes including its v2 manifest; dataset
+`137962bc5eace0f0c5ce4e50c2889d459a66087e`. Its August-to-September incremental
+export matches both independent full references byte-for-byte. Evidence is in the
+[dated result](docs/OPENING_INCREMENTAL_RESULT_2026-10-03.md) and
+[operator runbook](docs/OPENING_INCREMENTAL_RUNBOOK.md). Local candidate preparation
+does not change the production dataset.
 
 ## Platform direction
 
@@ -339,12 +346,14 @@ consume API capacity.
 
 1. Prove the crawler sustainable over the approved seed population and monthly
    refresh cycle.
-2. Port the retained TCN replay/indexing logic to build an incremental opening
-   tree from `data/crawler.db`.
-3. Expose a versioned read API for positions, moves, games, usernames, and FEN
-   lookup.
-4. Implement the opening-explorer interface inside `bughouse-chess` rather than
-   maintaining a second production frontend.
+2. Operate the proven durable incremental position graph using checked immutable
+   snapshots and retained parent generations. Follow the [incremental runbook](docs/OPENING_INCREMENTAL_RUNBOOK.md)
+   and [dated result](docs/OPENING_INCREMENTAL_RESULT_2026-10-03.md).
+3. Maintain the bounded, versioned position/state/game API and the opening
+   explorer already integrated into `bughouse-chess`.
+4. Preserve independent full A/B release validation until a future change to
+   that gate is explicitly approved on the basis of measured recovery/parity
+   evidence.
 
 ## Original work and license
 

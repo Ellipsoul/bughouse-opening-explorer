@@ -12,6 +12,7 @@ from .publication import (
 )
 from .vercel_transport import (
     COMPACT_POSITION_GRAPH_ARTIFACT_NAME,
+    SEPTEMBER_CANDIDATE_ARTIFACT_NAME,
     validate_transport_manifest,
 )
 
@@ -216,6 +217,7 @@ def stage_large_preview_bundle(
         AUTHORIZED_ARTIFACT_NAME,
         "full-post-qualification-20260802-v2-a",
         COMPACT_POSITION_GRAPH_ARTIFACT_NAME,
+        SEPTEMBER_CANDIDATE_ARTIFACT_NAME,
     }:
         raise ValueError(f"large preview artifact is not authorized: {artifact_name}")
     if destination.exists():

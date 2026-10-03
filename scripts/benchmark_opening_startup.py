@@ -19,12 +19,13 @@ def _percentiles(values):
     }
 
 
-def _child(artifact):
+def _child(artifact, runtime_attestation=None):
     process_started = time.perf_counter_ns()
     import_started = time.perf_counter_ns()
     from bughouse_explorer.opening.startup import measure_first_load
+
     import_ms = (time.perf_counter_ns() - import_started) / 1_000_000
-    measurement = measure_first_load(artifact)
+    measurement = measure_first_load(artifact, runtime_attestation=runtime_attestation)
     measurement["process"]["import_ms"] = import_ms
     measurement["process"]["script_to_result_ms"] = (
         time.perf_counter_ns() - process_started
@@ -55,7 +56,10 @@ def _summarize(samples):
             "phases": {
                 name: {
                     "wall_ms": _percentiles(
-                        [sample["startup"]["phases"][name]["wall_ms"] for sample in samples]
+                        [
+                            sample["startup"]["phases"][name]["wall_ms"]
+                            for sample in samples
+                        ]
                     ),
                     "scaling": phase["scaling"],
                 }
@@ -70,11 +74,22 @@ def main():
     parser.add_argument("artifact", type=Path)
     parser.add_argument("--repeats", type=int, default=10)
     parser.add_argument("--result", type=Path)
+    parser.add_argument(
+        "--runtime-attestation",
+        type=Path,
+        help="measure the existing build-attested runtime startup path",
+    )
     parser.add_argument("--child", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
 
     if args.child:
-        print(json.dumps(_child(args.artifact), separators=(",", ":"), sort_keys=True))
+        print(
+            json.dumps(
+                _child(args.artifact, args.runtime_attestation),
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+        )
         return
     if args.repeats < 1:
         parser.error("--repeats must be positive")
@@ -82,7 +97,17 @@ def main():
     samples = []
     for _ in range(args.repeats):
         completed = subprocess.run(
-            [sys.executable, str(Path(__file__).resolve()), str(args.artifact), "--child"],
+            [
+                sys.executable,
+                str(Path(__file__).resolve()),
+                str(args.artifact),
+                "--child",
+                *(
+                    ["--runtime-attestation", str(args.runtime_attestation)]
+                    if args.runtime_attestation
+                    else []
+                ),
+            ],
             check=True,
             capture_output=True,
             text=True,
@@ -90,7 +115,8 @@ def main():
         samples.append(json.loads(completed.stdout))
 
     payload = {
-        "artifact_component_bytes": samples[0]["startup"]["phases"]["component_checksum"]["bytes"],
+        "artifact_component_bytes": samples[0]["artifact_component_bytes"],
+        "validation_mode": samples[0]["validation_mode"],
         "dataset_version": samples[0]["dataset_version"],
         "fresh_process_repetitions": len(samples),
         "samples": samples,

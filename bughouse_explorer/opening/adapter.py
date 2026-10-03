@@ -65,7 +65,7 @@ class CrawlerSnapshotAdapter:
         self.path = Path(path).resolve()
         self.policy = policy or InclusionPolicy()
 
-    def iter_outcomes(self, selection: SnapshotSelection | None = None):
+    def iter_rows(self, selection: SnapshotSelection | None = None):
         uri = f"file:{self.path}?mode=ro&immutable=1"
         with sqlite3.connect(uri, uri=True) as connection:
             connection.row_factory = sqlite3.Row
@@ -109,47 +109,53 @@ class CrawlerSnapshotAdapter:
                 """,
                 parameters,
             )
-            for row in rows:
-                tcn = row["tcn"] or ""
-                reason = self._skip_reason(row, tcn)
-                if reason is not None:
-                    yield AdapterOutcome(
-                        source_rowid=row["source_rowid"], skip_reason=reason
-                    )
-                    continue
-                provenance_flags = []
-                if row["source"] == "callback":
-                    provenance_flags.append("callback_source")
-                if row["white_username"] == row["black_username"]:
-                    provenance_flags.append("same_account")
-                ratings = (row["white_rating"], row["black_rating"])
-                if any(rating == 0 for rating in ratings):
-                    provenance_flags.append("rating_zero")
-                if any(rating is not None and rating > 4_000 for rating in ratings):
-                    provenance_flags.append("rating_over_4000")
-                yield AdapterOutcome(
-                    source_rowid=row["source_rowid"],
-                    game=OpeningGame(
-                        uuid=row["uuid"],
-                        move_tokens=tuple(
-                            tcn[offset : offset + 2]
-                            for offset in range(0, len(tcn), 2)
-                        ),
-                        white_username=row["white_username"],
-                        black_username=row["black_username"],
-                        white_rating=row["white_rating"],
-                        black_rating=row["black_rating"],
-                        white_result=row["white_result"],
-                        black_result=row["black_result"],
-                        end_time=row["end_time"],
-                        time_control=row["time_control"],
-                        rated=bool(row["rated"]),
-                        url=row["url"],
-                        source=row["source"],
-                        content_hash=row["content_hash"],
-                        provenance_flags=tuple(provenance_flags),
-                    ),
-                )
+            yield from rows
+
+    def iter_outcomes(self, selection: SnapshotSelection | None = None):
+        for row in self.iter_rows(selection):
+            yield self.outcome_from_row(row)
+
+    def outcome_from_row(self, row):
+        """Apply exactly the same admission policy to a retained normalized row."""
+        tcn = row["tcn"] or ""
+        reason = self._skip_reason(row, tcn)
+        if reason is not None:
+            return AdapterOutcome(
+                source_rowid=row["source_rowid"], skip_reason=reason
+            )
+        provenance_flags = []
+        if row["source"] == "callback":
+            provenance_flags.append("callback_source")
+        if row["white_username"] == row["black_username"]:
+            provenance_flags.append("same_account")
+        ratings = (row["white_rating"], row["black_rating"])
+        if any(rating == 0 for rating in ratings):
+            provenance_flags.append("rating_zero")
+        if any(rating is not None and rating > 4_000 for rating in ratings):
+            provenance_flags.append("rating_over_4000")
+        return AdapterOutcome(
+            source_rowid=row["source_rowid"],
+            game=OpeningGame(
+                uuid=row["uuid"],
+                move_tokens=tuple(
+                    tcn[offset : offset + 2]
+                    for offset in range(0, len(tcn), 2)
+                ),
+                white_username=row["white_username"],
+                black_username=row["black_username"],
+                white_rating=row["white_rating"],
+                black_rating=row["black_rating"],
+                white_result=row["white_result"],
+                black_result=row["black_result"],
+                end_time=row["end_time"],
+                time_control=row["time_control"],
+                rated=bool(row["rated"]),
+                url=row["url"],
+                source=row["source"],
+                content_hash=row["content_hash"],
+                provenance_flags=tuple(provenance_flags),
+            ),
+        )
 
     def _skip_reason(self, row: sqlite3.Row, tcn: str) -> str | None:
         if not tcn:

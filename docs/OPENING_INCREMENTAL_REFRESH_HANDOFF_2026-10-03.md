@@ -1,5 +1,9 @@
 # Opening Explorer incremental refresh — execution handoff
 
+> Historical migration material: completed on 3 October 2026. For future months,
+> use [the current runbook](OPENING_INCREMENTAL_RUNBOOK.md) and
+> [completed result](OPENING_INCREMENTAL_RESULT_2026-10-03.md). Do not rerun this migration task.
+
 ## Session objective and boundary
 
 Implement and prove a durable incremental opening builder, apply the complete

@@ -123,3 +123,18 @@ def test_vercel_app_rejects_invalid_runtime_budgets(tmp_path, name, value):
             project_root=tmp_path,
             factory=lambda *_args, **_kwargs: None,
         )
+
+
+@pytest.mark.parametrize('name,allowed',[
+    ('full-position-graph-through-202609-20261003-r1-v2-a',True),
+    ('full-position-graph-through-202609-20261003-r1-v2-b',False),
+    ('incremental-position-graph-through-202609-20261003-r1-v2',False),
+])
+def test_september_runtime_boundary(tmp_path,name,allowed):
+    def call():
+        return create_vercel_app(environ={'OPENING_EXPLORER_SERVICE_TOKEN':'fixture',
+            'OPENING_EXPLORER_ARTIFACT_NAME':name},project_root=tmp_path,
+            factory=lambda artifact,**kw:artifact.name)
+    if allowed: assert call()==name
+    else:
+        with pytest.raises(RuntimeError,match='not authorized'):call()

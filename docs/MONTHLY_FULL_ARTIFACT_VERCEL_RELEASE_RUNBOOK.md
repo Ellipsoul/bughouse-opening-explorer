@@ -136,7 +136,8 @@ staging a new month:
 
 1. add a failing test for the exact new artifact-A name;
 2. update the explicit allowlists in
-   `bughouse_explorer/opening/vercel_stage.py` and
+   `bughouse_explorer/opening/vercel_transport.py`,
+   `bughouse_explorer/opening/vercel_stage.py`, and
    `bughouse_explorer/opening/vercel_hosted.py`;
 3. keep artifact B rejected;
 4. keep representative and obsolete names read-only or rejected according to
@@ -152,7 +153,7 @@ Run, at minimum:
 
 ```text
 .venv/bin/python scripts/benchmark_opening_startup.py <artifact-a> --repeats 20
-.venv/bin/python scripts/benchmark_opening_service.py <artifact-a> --repeats 20
+.venv/bin/python scripts/benchmark_opening_position_graph.py <artifact-a> --repeats 20
 .venv/bin/python scripts/benchmark_opening_publication_lifecycle.py <current-artifact> <artifact-a> <absolute-temp-current-pointer.json>
 ```
 
@@ -162,10 +163,21 @@ and browser matrix from the latest result. Keep the default 500-node/256-KiB
 budgets and 4,000-node/512-KiB hard caps unless a separate design change is
 approved.
 
-Compare the new cold-start distribution with the frontend's current 30-second
+Compare the new cold-start distribution with the frontend's source-default 45-second
 upstream timeout and 60-second Function duration. If representative cold or
-filtered requests approach 30 seconds, stop and make an explicit hosting/UX
-decision before Production. Do not silently raise the boundary.
+filtered requests approach the configured timeout, stop and make an explicit hosting/UX
+decision before Production. Do not silently raise the boundary. The current source default is 45,000 ms,
+with an explicit override range of 100–60,000 ms and Function `maxDuration=60`.
+The former 30-second description was stale. Inspect the actual scoped override
+by key/configuration during release preflight; this correction changes no limit.
+
+The HTTP oracle automatically discovers graph root/state, deep, true-ending,
+and drop-edge witnesses. Graph source games use `/api/edges/{id}/games`.
+`benchmark_opening_service.py` is a legacy prefix-reader benchmark and must not
+certify graph artifacts. Startup and publication-lifecycle tools are compatible
+with graph artifacts. Use `scripts/validate_opening_snapshot.py` with the exact
+snapshot SHA-256 and latest completed run ID for monthly recovery checks; the
+fixed-window SQL remains historical bootstrap evidence.
 
 ## Phase 5 — prepare deterministic transport offline
 
@@ -265,6 +277,8 @@ real execution requires the manifest ID printed by that dry run:
   --project-id prj_BUO6dAAVzaQAhjbFlJ7e5Lt1I2dP \
   --project-name bughouse-opening-explorer-service \
   --runtime-env-key OPENING_EXPLORER_SERVICE_TOKEN \
+  --runtime-env-key OPENING_EXPLORER_ARTIFACT_NAME \
+  --build-env-key OPENING_EXPLORER_ARTIFACT_NAME \
   --build-env-key VERCEL_SUPPORT_LARGE_FUNCTIONS \
   --create-preview
 ```
@@ -274,6 +288,14 @@ After explicit full-Preview approval, repeat with `--execute` and the exact
 service token, and `VERCEL_SUPPORT_LARGE_FUNCTIONS=1` through the current
 server-side process only. Do not place them in arguments, reports, Git, or a
 browser variable.
+
+Set the non-secret `OPENING_EXPLORER_ARTIFACT_NAME` to the exact approved A name
+in both build and runtime scopes. The staged include path alone does not select
+the runtime reader; omitting this setting can select the representative default.
+For the September migration the only new allowed name is
+`full-position-graph-through-202609-20261003-r1-v2-a`. B and incremental comparison
+outputs are not upload candidates. Preserve this exact selection in any approved
+Production clone, while letting Vercel bind its existing Production credential.
 
 On retry or a service-only correction, use
 `--reuse-acknowledgements-from-stage` and

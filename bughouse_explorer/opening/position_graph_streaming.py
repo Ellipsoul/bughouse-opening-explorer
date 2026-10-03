@@ -348,92 +348,7 @@ def build_streaming_position_graph(
     connection.execute("PRAGMA synchronous=OFF")
     connection.execute("PRAGMA temp_store=FILE")
     connection.execute("PRAGMA cache_size=-262144")
-    connection.executescript(
-        """
-        CREATE TABLE positions(
-            key BLOB PRIMARY KEY,
-            placement TEXT NOT NULL
-        ) WITHOUT ROWID;
-        CREATE TABLE states(
-            key BLOB PRIMARY KEY,
-            position_key BLOB NOT NULL,
-            fen TEXT NOT NULL
-        ) WITHOUT ROWID;
-        CREATE TABLE edges(
-            key BLOB PRIMARY KEY,
-            parent_state_key BLOB NOT NULL,
-            move_token BLOB NOT NULL,
-            child_state_key BLOB NOT NULL,
-            move_label TEXT NOT NULL,
-            UNIQUE(parent_state_key, move_token)
-        ) WITHOUT ROWID;
-        CREATE TABLE position_games(
-            position_key BLOB NOT NULL,
-            ordinal INTEGER NOT NULL,
-            PRIMARY KEY(position_key, ordinal)
-        ) WITHOUT ROWID;
-        CREATE TABLE state_games(
-            state_key BLOB NOT NULL,
-            ordinal INTEGER NOT NULL,
-            outcome INTEGER NOT NULL,
-            PRIMARY KEY(state_key, ordinal)
-        ) WITHOUT ROWID;
-        CREATE TABLE edge_games(
-            edge_key BLOB NOT NULL,
-            ordinal INTEGER NOT NULL,
-            outcome INTEGER NOT NULL,
-            PRIMARY KEY(edge_key, ordinal)
-        ) WITHOUT ROWID;
-        CREATE TABLE endings(
-            state_key BLOB NOT NULL,
-            ordinal INTEGER NOT NULL,
-            PRIMARY KEY(state_key, ordinal)
-        ) WITHOUT ROWID;
-        CREATE TABLE posting_entries(
-            posting_key TEXT NOT NULL,
-            ordinal INTEGER NOT NULL,
-            PRIMARY KEY(posting_key, ordinal)
-        ) WITHOUT ROWID;
-        CREATE TABLE game_uuids(
-            uuid TEXT PRIMARY KEY
-        ) WITHOUT ROWID;
-        CREATE TRIGGER position_hash_collision BEFORE INSERT ON positions
-        WHEN EXISTS(
-            SELECT 1 FROM positions
-            WHERE key=NEW.key AND placement<>NEW.placement
-        ) BEGIN
-            SELECT RAISE(ABORT, 'position hash collision');
-        END;
-        CREATE TRIGGER state_hash_collision BEFORE INSERT ON states
-        WHEN EXISTS(
-            SELECT 1 FROM states
-            WHERE key=NEW.key AND (position_key<>NEW.position_key OR fen<>NEW.fen)
-        ) BEGIN
-            SELECT RAISE(ABORT, 'state hash collision');
-        END;
-        CREATE TRIGGER edge_identity_collision BEFORE INSERT ON edges
-        WHEN EXISTS(
-            SELECT 1 FROM edges
-            WHERE key=NEW.key AND (
-                parent_state_key<>NEW.parent_state_key
-                OR move_token<>NEW.move_token
-                OR child_state_key<>NEW.child_state_key
-                OR move_label<>NEW.move_label
-            )
-        ) BEGIN
-            SELECT RAISE(ABORT, 'edge hash collision');
-        END;
-        CREATE TRIGGER edge_replay_conflict BEFORE INSERT ON edges
-        WHEN EXISTS(
-            SELECT 1 FROM edges
-            WHERE parent_state_key=NEW.parent_state_key
-              AND move_token=NEW.move_token
-              AND (child_state_key<>NEW.child_state_key OR move_label<>NEW.move_label)
-        ) BEGIN
-            SELECT RAISE(ABORT, 'state and token map to multiple children');
-        END;
-        """
-    )
+    create_graph_schema(connection)
 
     skipped = Counter()
     accepted = 0
@@ -625,312 +540,12 @@ def build_streaming_position_graph(
                 "accepted game content or order changed between graph build passes"
             )
 
-        connection.executescript(
-            """
-            CREATE TABLE position_ids(
-                id INTEGER PRIMARY KEY,
-                key BLOB NOT NULL UNIQUE
-            );
-            CREATE TABLE state_ids(
-                id INTEGER PRIMARY KEY,
-                key BLOB NOT NULL UNIQUE
-            );
-            CREATE TABLE edge_ids(
-                id INTEGER PRIMARY KEY,
-                key BLOB NOT NULL UNIQUE,
-                parent_state_id INTEGER NOT NULL,
-                child_state_id INTEGER NOT NULL
-            );
-            """
-        )
-        connection.executemany(
-            "INSERT INTO position_ids VALUES (?, ?)",
-            enumerate(
-                row[0] for row in connection.execute(
-                    "SELECT key FROM positions ORDER BY key, placement"
-                )
-            ),
-        )
-        connection.executemany(
-            "INSERT INTO state_ids VALUES (?, ?)",
-            enumerate(
-                row[0]
-                for row in connection.execute("SELECT key FROM states ORDER BY key, fen")
-            ),
-        )
-        edge_select = connection.execute(
-            """
-            SELECT e.key, parent.id, child.id
-            FROM edges AS e
-            JOIN state_ids AS parent ON parent.key=e.parent_state_key
-            JOIN state_ids AS child ON child.key=e.child_state_key
-            ORDER BY parent.id, e.move_token, child.id
-            """
-        )
-        connection.executemany(
-            "INSERT INTO edge_ids VALUES (?, ?, ?, ?)",
-            ((index, *row) for index, row in enumerate(edge_select)),
-        )
-        connection.execute(
-            "CREATE INDEX edge_ids_parent ON edge_ids(parent_state_id, id)"
-        )
-        connection.commit()
-
-        positions_count = connection.execute(
-            "SELECT COUNT(*) FROM position_ids"
-        ).fetchone()[0]
-        states_count = connection.execute("SELECT COUNT(*) FROM state_ids").fetchone()[0]
-        edges_count = connection.execute("SELECT COUNT(*) FROM edge_ids").fetchone()[0]
-
-        position_memberships = _Groups(
-            connection.execute(
-                """
-                SELECT ids.id, facts.ordinal
-                FROM position_games AS facts
-                JOIN position_ids AS ids ON ids.key=facts.position_key
-                ORDER BY ids.id, facts.ordinal
-                """
-            )
-        )
-        state_memberships = _Groups(
-            connection.execute(
-                """
-                SELECT ids.id, facts.ordinal, facts.outcome
-                FROM state_games AS facts
-                JOIN state_ids AS ids ON ids.key=facts.state_key
-                ORDER BY ids.id, facts.ordinal
-                """
-            )
-        )
-        ending_memberships = _Groups(
-            connection.execute(
-                """
-                SELECT ids.id, facts.ordinal
-                FROM endings AS facts
-                JOIN state_ids AS ids ON ids.key=facts.state_key
-                ORDER BY ids.id, facts.ordinal
-                """
-            )
-        )
-        edge_memberships = _Groups(
-            connection.execute(
-                """
-                SELECT ids.id, facts.ordinal, facts.outcome
-                FROM edge_games AS facts
-                JOIN edge_ids AS ids ON ids.key=facts.edge_key
-                ORDER BY ids.id, facts.ordinal
-                """
-            )
-        )
-        edge_ranges = _Groups(
-            connection.execute(
-                """
-                SELECT parent_state_id, MIN(id), COUNT(*)
-                FROM edge_ids
-                GROUP BY parent_state_id
-                ORDER BY parent_state_id
-                """
-            )
-        )
-
-        membership_cursor = 0
-        strings_path = directory / "strings.bin"
-        memberships_path = directory / "memberships.bin"
-        with strings_path.open("wb") as strings, memberships_path.open(
-            "wb"
-        ) as memberships, (directory / "positions.bin").open(
-            "wb"
-        ) as positions_stream, (directory / "states.bin").open("wb") as states_stream:
-            for position_id, placement in connection.execute(
-                """
-                SELECT ids.id, positions.placement
-                FROM position_ids AS ids
-                JOIN positions ON positions.key=ids.key
-                ORDER BY ids.id
-                """
-            ):
-                encoded = placement.encode("ascii")
-                string_offset = strings.tell()
-                strings.write(encoded)
-                rows = position_memberships.take(position_id)
-                ordinals = [row[0] for row in rows]
-                posting_start = membership_cursor
-                _write_uint32s(memberships, ordinals)
-                membership_cursor += len(ordinals)
-                positions_stream.write(
-                    POSITION.pack(
-                        string_offset, len(encoded), posting_start, len(ordinals)
-                    )
-                )
-
-            for state_id, position_id, fen in connection.execute(
-                """
-                SELECT state_ids.id, position_ids.id, states.fen
-                FROM state_ids
-                JOIN states ON states.key=state_ids.key
-                JOIN position_ids ON position_ids.key=states.position_key
-                ORDER BY state_ids.id
-                """
-            ):
-                state_rows = state_memberships.take(state_id)
-                state_ordinals = [row[0] for row in state_rows]
-                state_start = membership_cursor
-                _write_uint32s(memberships, state_ordinals)
-                membership_cursor += len(state_ordinals)
-                ending_rows = ending_memberships.take(state_id)
-                ending_ordinals = [row[0] for row in ending_rows]
-                ending_start = membership_cursor
-                _write_uint32s(memberships, ending_ordinals)
-                membership_cursor += len(ending_ordinals)
-                ranges = edge_ranges.take(state_id)
-                if ranges:
-                    edge_start, edge_count = ranges[0]
-                else:
-                    edge_start, edge_count = 0, 0
-                states_stream.write(
-                    STATE.pack(
-                        position_id,
-                        edge_start,
-                        edge_count,
-                        state_start,
-                        len(state_ordinals),
-                        ending_start,
-                        len(ending_ordinals),
-                        *_counts(state_rows),
-                        *_state_context(fen),
-                    )
-                )
-
-            with (directory / "edges.bin").open("wb") as edges_stream:
-                for (
-                    edge_id,
-                    child_position_id,
-                    child_state_id,
-                    move_token,
-                    move_label,
-                ) in connection.execute(
-                    """
-                    SELECT edge_ids.id, child_state.position_key_id,
-                           edge_ids.child_state_id, edges.move_token, edges.move_label
-                    FROM edge_ids
-                    JOIN edges ON edges.key=edge_ids.key
-                    JOIN (
-                        SELECT state_ids.id, position_ids.id AS position_key_id
-                        FROM state_ids
-                        JOIN states ON states.key=state_ids.key
-                        JOIN position_ids ON position_ids.key=states.position_key
-                    ) AS child_state ON child_state.id=edge_ids.child_state_id
-                    ORDER BY edge_ids.id
-                    """
-                ):
-                    label_bytes = move_label.encode("utf-8")
-                    label_offset = strings.tell()
-                    strings.write(label_bytes)
-                    rows = edge_memberships.take(edge_id)
-                    ordinals = [row[0] for row in rows]
-                    posting_start = membership_cursor
-                    _write_uint32s(memberships, ordinals)
-                    membership_cursor += len(ordinals)
-                    edges_stream.write(
-                        EDGE.pack(
-                            child_position_id,
-                            child_state_id,
-                            move_token,
-                            label_offset,
-                            len(label_bytes),
-                            posting_start,
-                            len(ordinals),
-                            *_counts(rows),
-                        )
-                    )
-
-        posting_index = {}
-        with (directory / "postings.bin").open("wb") as stream:
-            cursor = iter(
-                connection.execute(
-                    "SELECT posting_key, ordinal FROM posting_entries ORDER BY posting_key, ordinal"
-                )
-            )
-            pending = next(cursor, None)
-            while pending is not None:
-                key = pending[0]
-                values = []
-                while pending is not None and pending[0] == key:
-                    values.append(pending[1])
-                    pending = next(cursor, None)
-                posting_index[key] = {"offset": stream.tell(), "count": len(values)}
-                _write_uint32s(stream, values)
-        (directory / "postings.json").write_text(
-            json.dumps(posting_index, separators=(",", ":"), sort_keys=True)
-        )
-
-        root_placement_key = identity_key("position", Board().placement())
-        root_state_key = identity_key("state", Board().position_key())
-        root_position_id = connection.execute(
-            "SELECT id FROM position_ids WHERE key=?", (root_placement_key,)
-        ).fetchone()[0]
-        root_state_id = connection.execute(
-            "SELECT id FROM state_ids WHERE key=?", (root_state_key,)
-        ).fetchone()[0]
-        files = [
-            "edges.bin",
-            "game_offsets.bin",
-            "games.bin",
-            "memberships.bin",
-            "positions.bin",
-            "postings.bin",
-            "postings.json",
-            "states.bin",
-            "strings.bin",
-        ]
-        build_id = observed_input_digest
-        manifest = {
-            "adapter_policy": ADAPTER_POLICY_VERSION,
-            "build_id": build_id,
-            "dataset_version": build_id,
-            "edge_record_bytes": EDGE.size,
-            "edges": edges_count,
-            "files": {
-                name: {
-                    "bytes": (directory / name).stat().st_size,
-                    "sha256": _file_hash(directory / name),
-                }
-                for name in files
-            },
-            "format_version": "packed-position-graph-v1",
-            "games": accepted,
-            "node_semantics": "piece-placement-v1",
-            "position_record_bytes": POSITION.size,
-            "positions": positions_count,
-            "root_node_id": root_position_id,
-            "root_state_id": root_state_id,
-            "replay_policy": GRAPH_REPLAY_POLICY_VERSION,
-            "source_fingerprint": source_fingerprint,
-            "state_record_bytes": STATE.size,
-            "state_semantics": "side-castling-en-passant-v1",
-            "states": states_count,
-            "support_semantics": "distinct-game-membership-v1",
-            "terminal_policy": terminal_policy,
-        }
-        if shared_positions is not None:
-            manifest["shared_positions"] = shared_positions.count
-        (directory / "manifest.json").write_text(
-            json.dumps(manifest, indent=2, sort_keys=True) + "\n"
-        )
-        temporary_bytes = staging_path.stat().st_size
-        final_bytes = sum((directory / name).stat().st_size for name in files) + (
-            directory / "manifest.json"
-        ).stat().st_size
-        return StreamingGraphBuildReport(
-            build_id=build_id,
-            accepted_games=accepted,
-            skipped=observed_skipped,
-            positions=positions_count,
-            states=states_count,
-            edges=edges_count,
-            memberships=membership_cursor,
-            temporary_bytes=temporary_bytes,
-            final_bytes=final_bytes,
+        return export_graph_facts(
+            connection, directory, staging_path=staging_path, accepted=accepted,
+            observed_skipped=observed_skipped,
+            observed_input_digest=observed_input_digest,
+            source_fingerprint=source_fingerprint, terminal_policy=terminal_policy,
+            shared_positions_count=shared_positions.count if shared_positions else None,
         )
     finally:
         connection.close()
@@ -1002,4 +617,406 @@ def build_two_pass_position_graph(
             if path.is_file()
         ),
         final_bytes=report.final_bytes,
+    )
+
+
+def create_graph_schema(connection):
+    """Create stable graph facts with collision and deterministic-replay guards."""
+    connection.executescript(
+        """
+        CREATE TABLE positions(
+            key BLOB PRIMARY KEY,
+            placement TEXT NOT NULL
+        ) WITHOUT ROWID;
+        CREATE TABLE states(
+            key BLOB PRIMARY KEY,
+            position_key BLOB NOT NULL,
+            fen TEXT NOT NULL
+        ) WITHOUT ROWID;
+        CREATE TABLE edges(
+            key BLOB PRIMARY KEY,
+            parent_state_key BLOB NOT NULL,
+            move_token BLOB NOT NULL,
+            child_state_key BLOB NOT NULL,
+            move_label TEXT NOT NULL,
+            UNIQUE(parent_state_key, move_token)
+        ) WITHOUT ROWID;
+        CREATE TABLE position_games(
+            position_key BLOB NOT NULL,
+            ordinal INTEGER NOT NULL,
+            PRIMARY KEY(position_key, ordinal)
+        ) WITHOUT ROWID;
+        CREATE TABLE state_games(
+            state_key BLOB NOT NULL,
+            ordinal INTEGER NOT NULL,
+            outcome INTEGER NOT NULL,
+            PRIMARY KEY(state_key, ordinal)
+        ) WITHOUT ROWID;
+        CREATE TABLE edge_games(
+            edge_key BLOB NOT NULL,
+            ordinal INTEGER NOT NULL,
+            outcome INTEGER NOT NULL,
+            PRIMARY KEY(edge_key, ordinal)
+        ) WITHOUT ROWID;
+        CREATE TABLE endings(
+            state_key BLOB NOT NULL,
+            ordinal INTEGER NOT NULL,
+            PRIMARY KEY(state_key, ordinal)
+        ) WITHOUT ROWID;
+        CREATE TABLE posting_entries(
+            posting_key TEXT NOT NULL,
+            ordinal INTEGER NOT NULL,
+            PRIMARY KEY(posting_key, ordinal)
+        ) WITHOUT ROWID;
+        CREATE TABLE game_uuids(
+            uuid TEXT PRIMARY KEY
+        ) WITHOUT ROWID;
+        CREATE TRIGGER position_hash_collision BEFORE INSERT ON positions
+        WHEN EXISTS(
+            SELECT 1 FROM positions
+            WHERE key=NEW.key AND placement<>NEW.placement
+        ) BEGIN
+            SELECT RAISE(ABORT, 'position hash collision');
+        END;
+        CREATE TRIGGER state_hash_collision BEFORE INSERT ON states
+        WHEN EXISTS(
+            SELECT 1 FROM states
+            WHERE key=NEW.key AND (position_key<>NEW.position_key OR fen<>NEW.fen)
+        ) BEGIN
+            SELECT RAISE(ABORT, 'state hash collision');
+        END;
+        CREATE TRIGGER edge_identity_collision BEFORE INSERT ON edges
+        WHEN EXISTS(
+            SELECT 1 FROM edges
+            WHERE key=NEW.key AND (
+                parent_state_key<>NEW.parent_state_key
+                OR move_token<>NEW.move_token
+                OR child_state_key<>NEW.child_state_key
+                OR move_label<>NEW.move_label
+            )
+        ) BEGIN
+            SELECT RAISE(ABORT, 'edge hash collision');
+        END;
+        CREATE TRIGGER edge_replay_conflict BEFORE INSERT ON edges
+        WHEN EXISTS(
+            SELECT 1 FROM edges
+            WHERE parent_state_key=NEW.parent_state_key
+              AND move_token=NEW.move_token
+              AND (child_state_key<>NEW.child_state_key OR move_label<>NEW.move_label)
+        ) BEGIN
+            SELECT RAISE(ABORT, 'state and token map to multiple children');
+        END;
+        """
+    )
+
+def export_graph_facts(connection, directory, *, staging_path, accepted,
+                       observed_skipped, observed_input_digest, source_fingerprint,
+                       terminal_policy, shared_positions_count=None):
+    """Canonical export of materialized facts; never performs source replay."""
+    connection.executescript(
+        """
+        CREATE TABLE position_ids(
+            id INTEGER PRIMARY KEY,
+            key BLOB NOT NULL UNIQUE
+        );
+        CREATE TABLE state_ids(
+            id INTEGER PRIMARY KEY,
+            key BLOB NOT NULL UNIQUE
+        );
+        CREATE TABLE edge_ids(
+            id INTEGER PRIMARY KEY,
+            key BLOB NOT NULL UNIQUE,
+            parent_state_id INTEGER NOT NULL,
+            child_state_id INTEGER NOT NULL
+        );
+        """
+    )
+    connection.executemany(
+        "INSERT INTO position_ids VALUES (?, ?)",
+        enumerate(
+            row[0] for row in connection.execute(
+                "SELECT key FROM positions ORDER BY key, placement"
+            )
+        ),
+    )
+    connection.executemany(
+        "INSERT INTO state_ids VALUES (?, ?)",
+        enumerate(
+            row[0]
+            for row in connection.execute("SELECT key FROM states ORDER BY key, fen")
+        ),
+    )
+    edge_select = connection.execute(
+        """
+        SELECT e.key, parent.id, child.id
+        FROM edges AS e
+        JOIN state_ids AS parent ON parent.key=e.parent_state_key
+        JOIN state_ids AS child ON child.key=e.child_state_key
+        ORDER BY parent.id, e.move_token, child.id
+        """
+    )
+    connection.executemany(
+        "INSERT INTO edge_ids VALUES (?, ?, ?, ?)",
+        ((index, *row) for index, row in enumerate(edge_select)),
+    )
+    connection.execute(
+        "CREATE INDEX edge_ids_parent ON edge_ids(parent_state_id, id)"
+    )
+    connection.commit()
+
+    positions_count = connection.execute(
+        "SELECT COUNT(*) FROM position_ids"
+    ).fetchone()[0]
+    states_count = connection.execute("SELECT COUNT(*) FROM state_ids").fetchone()[0]
+    edges_count = connection.execute("SELECT COUNT(*) FROM edge_ids").fetchone()[0]
+
+    position_memberships = _Groups(
+        connection.execute(
+            """
+            SELECT ids.id, facts.ordinal
+            FROM position_games AS facts
+            JOIN position_ids AS ids ON ids.key=facts.position_key
+            ORDER BY ids.id, facts.ordinal
+            """
+        )
+    )
+    state_memberships = _Groups(
+        connection.execute(
+            """
+            SELECT ids.id, facts.ordinal, facts.outcome
+            FROM state_games AS facts
+            JOIN state_ids AS ids ON ids.key=facts.state_key
+            ORDER BY ids.id, facts.ordinal
+            """
+        )
+    )
+    ending_memberships = _Groups(
+        connection.execute(
+            """
+            SELECT ids.id, facts.ordinal
+            FROM endings AS facts
+            JOIN state_ids AS ids ON ids.key=facts.state_key
+            ORDER BY ids.id, facts.ordinal
+            """
+        )
+    )
+    edge_memberships = _Groups(
+        connection.execute(
+            """
+            SELECT ids.id, facts.ordinal, facts.outcome
+            FROM edge_games AS facts
+            JOIN edge_ids AS ids ON ids.key=facts.edge_key
+            ORDER BY ids.id, facts.ordinal
+            """
+        )
+    )
+    edge_ranges = _Groups(
+        connection.execute(
+            """
+            SELECT parent_state_id, MIN(id), COUNT(*)
+            FROM edge_ids
+            GROUP BY parent_state_id
+            ORDER BY parent_state_id
+            """
+        )
+    )
+
+    membership_cursor = 0
+    strings_path = directory / "strings.bin"
+    memberships_path = directory / "memberships.bin"
+    with strings_path.open("wb") as strings, memberships_path.open(
+        "wb"
+    ) as memberships, (directory / "positions.bin").open(
+        "wb"
+    ) as positions_stream, (directory / "states.bin").open("wb") as states_stream:
+        for position_id, placement in connection.execute(
+            """
+            SELECT ids.id, positions.placement
+            FROM position_ids AS ids
+            JOIN positions ON positions.key=ids.key
+            ORDER BY ids.id
+            """
+        ):
+            encoded = placement.encode("ascii")
+            string_offset = strings.tell()
+            strings.write(encoded)
+            rows = position_memberships.take(position_id)
+            ordinals = [row[0] for row in rows]
+            posting_start = membership_cursor
+            _write_uint32s(memberships, ordinals)
+            membership_cursor += len(ordinals)
+            positions_stream.write(
+                POSITION.pack(
+                    string_offset, len(encoded), posting_start, len(ordinals)
+                )
+            )
+
+        for state_id, position_id, fen in connection.execute(
+            """
+            SELECT state_ids.id, position_ids.id, states.fen
+            FROM state_ids
+            JOIN states ON states.key=state_ids.key
+            JOIN position_ids ON position_ids.key=states.position_key
+            ORDER BY state_ids.id
+            """
+        ):
+            state_rows = state_memberships.take(state_id)
+            state_ordinals = [row[0] for row in state_rows]
+            state_start = membership_cursor
+            _write_uint32s(memberships, state_ordinals)
+            membership_cursor += len(state_ordinals)
+            ending_rows = ending_memberships.take(state_id)
+            ending_ordinals = [row[0] for row in ending_rows]
+            ending_start = membership_cursor
+            _write_uint32s(memberships, ending_ordinals)
+            membership_cursor += len(ending_ordinals)
+            ranges = edge_ranges.take(state_id)
+            if ranges:
+                edge_start, edge_count = ranges[0]
+            else:
+                edge_start, edge_count = 0, 0
+            states_stream.write(
+                STATE.pack(
+                    position_id,
+                    edge_start,
+                    edge_count,
+                    state_start,
+                    len(state_ordinals),
+                    ending_start,
+                    len(ending_ordinals),
+                    *_counts(state_rows),
+                    *_state_context(fen),
+                )
+            )
+
+        with (directory / "edges.bin").open("wb") as edges_stream:
+            for (
+                edge_id,
+                child_position_id,
+                child_state_id,
+                move_token,
+                move_label,
+            ) in connection.execute(
+                """
+                SELECT edge_ids.id, child_state.position_key_id,
+                       edge_ids.child_state_id, edges.move_token, edges.move_label
+                FROM edge_ids
+                JOIN edges ON edges.key=edge_ids.key
+                JOIN (
+                    SELECT state_ids.id, position_ids.id AS position_key_id
+                    FROM state_ids
+                    JOIN states ON states.key=state_ids.key
+                    JOIN position_ids ON position_ids.key=states.position_key
+                ) AS child_state ON child_state.id=edge_ids.child_state_id
+                ORDER BY edge_ids.id
+                """
+            ):
+                label_bytes = move_label.encode("utf-8")
+                label_offset = strings.tell()
+                strings.write(label_bytes)
+                rows = edge_memberships.take(edge_id)
+                ordinals = [row[0] for row in rows]
+                posting_start = membership_cursor
+                _write_uint32s(memberships, ordinals)
+                membership_cursor += len(ordinals)
+                edges_stream.write(
+                    EDGE.pack(
+                        child_position_id,
+                        child_state_id,
+                        move_token,
+                        label_offset,
+                        len(label_bytes),
+                        posting_start,
+                        len(ordinals),
+                        *_counts(rows),
+                    )
+                )
+
+    posting_index = {}
+    with (directory / "postings.bin").open("wb") as stream:
+        cursor = iter(
+            connection.execute(
+                "SELECT posting_key, ordinal FROM posting_entries ORDER BY posting_key, ordinal"
+            )
+        )
+        pending = next(cursor, None)
+        while pending is not None:
+            key = pending[0]
+            values = []
+            while pending is not None and pending[0] == key:
+                values.append(pending[1])
+                pending = next(cursor, None)
+            posting_index[key] = {"offset": stream.tell(), "count": len(values)}
+            _write_uint32s(stream, values)
+    (directory / "postings.json").write_text(
+        json.dumps(posting_index, separators=(",", ":"), sort_keys=True)
+    )
+
+    root_placement_key = identity_key("position", Board().placement())
+    root_state_key = identity_key("state", Board().position_key())
+    root_position_id = connection.execute(
+        "SELECT id FROM position_ids WHERE key=?", (root_placement_key,)
+    ).fetchone()[0]
+    root_state_id = connection.execute(
+        "SELECT id FROM state_ids WHERE key=?", (root_state_key,)
+    ).fetchone()[0]
+    files = [
+        "edges.bin",
+        "game_offsets.bin",
+        "games.bin",
+        "memberships.bin",
+        "positions.bin",
+        "postings.bin",
+        "postings.json",
+        "states.bin",
+        "strings.bin",
+    ]
+    build_id = observed_input_digest
+    manifest = {
+        "adapter_policy": ADAPTER_POLICY_VERSION,
+        "build_id": build_id,
+        "dataset_version": build_id,
+        "edge_record_bytes": EDGE.size,
+        "edges": edges_count,
+        "files": {
+            name: {
+                "bytes": (directory / name).stat().st_size,
+                "sha256": _file_hash(directory / name),
+            }
+            for name in files
+        },
+        "format_version": "packed-position-graph-v1",
+        "games": accepted,
+        "node_semantics": "piece-placement-v1",
+        "position_record_bytes": POSITION.size,
+        "positions": positions_count,
+        "root_node_id": root_position_id,
+        "root_state_id": root_state_id,
+        "replay_policy": GRAPH_REPLAY_POLICY_VERSION,
+        "source_fingerprint": source_fingerprint,
+        "state_record_bytes": STATE.size,
+        "state_semantics": "side-castling-en-passant-v1",
+        "states": states_count,
+        "support_semantics": "distinct-game-membership-v1",
+        "terminal_policy": terminal_policy,
+    }
+    if shared_positions_count is not None:
+        manifest["shared_positions"] = shared_positions_count
+    (directory / "manifest.json").write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+    )
+    temporary_bytes = staging_path.stat().st_size
+    final_bytes = sum((directory / name).stat().st_size for name in files) + (
+        directory / "manifest.json"
+    ).stat().st_size
+    return StreamingGraphBuildReport(
+        build_id=build_id,
+        accepted_games=accepted,
+        skipped=observed_skipped,
+        positions=positions_count,
+        states=states_count,
+        edges=edges_count,
+        memberships=membership_cursor,
+        temporary_bytes=temporary_bytes,
+        final_bytes=final_bytes,
     )

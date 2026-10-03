@@ -39,7 +39,13 @@ def _private_cases(artifact, deep_node, internal_ending_node, drop_node):
             (key for key in postings if key.startswith("black\0")),
             key=lambda key: (postings[key]["count"], key),
         ).split("\0", 1)[1]
+        if service.graph_mode:
+            return version, _graph_cases(service, white, black)
         first_game = service.index._game(0)
+        if any(value is None for value in (deep_node, internal_ending_node, drop_node)):
+            raise ValueError(
+                "prefix rollback oracle requires explicit legacy node witnesses"
+            )
     bounded = {
         "root": _query(0, version),
         "deep_direct": _query(deep_node, version),
@@ -75,6 +81,78 @@ def _private_cases(artifact, deep_node, internal_ending_node, drop_node):
     return version, {"metadata": "/api/meta", **bounded}
 
 
+def _graph_cases(service, white, black):
+    """Discover actual state/edge witnesses; public IDs are never assumed stable."""
+    index = service.index
+    version = service.dataset_version
+    root = index.root_state_id
+
+    def neighborhood(state, **parameters):
+        node = index.state_structure(state)["node_id"]
+        return _query(node, version, state_id=state, **parameters)
+
+    def games(edge):
+        return f"/api/edges/{edge}/games?" + urlencode(
+            {"dataset_version": version, "limit": 6}
+        )
+
+    state = root
+    seen = {state}
+    for _ in range(12):
+        outgoing = index.outgoing_edges(state)
+        if not outgoing:
+            break
+        edge = max(outgoing, key=lambda e: (e["_game_count"], -e["id"]))
+        state = edge["child_state_id"]
+        if state in seen:
+            break
+        seen.add(state)
+    ending = None
+    drop = None
+    for edge_id in range(index.manifest["edges"]):
+        edge = index._edge(edge_id)
+        child = edge[1]
+        if drop is None and "@" in index._string(edge[3], edge[4], encoding="utf-8"):
+            drop = edge_id
+        child_state = index.state_structure(child)
+        if (
+            ending is None
+            and child_state["_ending_count"]
+            and child_state["outgoing_count"]
+        ):
+            examples = service.edge_game_examples(
+                dataset_version=version, edge_id=edge_id, limit=1
+            )
+            if examples["actual_ending_count"]:
+                ending = (edge_id, child)
+        if ending is not None and drop is not None:
+            break
+    if ending is None or drop is None:
+        raise ValueError("graph oracle requires actual ending and drop witnesses")
+    first = index.game(0)
+    return {
+        "metadata": "/api/meta",
+        "root": neighborhood(root),
+        "deep_direct": neighborhood(state),
+        "internal_ending_neighborhood": neighborhood(ending[1]),
+        "internal_ending_games": games(ending[0]),
+        "drop_terminal_games": games(drop),
+        "drop_neighborhood": neighborhood(index._edge(drop)[1]),
+        "white_filter": neighborhood(root, white=white),
+        "black_filter": neighborhood(root, black=black),
+        "exact_pair_filter": neighborhood(
+            root, white=first["white_username"], black=first["black_username"]
+        ),
+        "invalid_player_filter": neighborhood(root, white="__missing_player__"),
+        "autocomplete": "/api/players?"
+        + urlencode({"dataset_version": version, "prefix": white[:3], "limit": 10}),
+        "stale_version": _query(index.root_position_id, "stale", state_id=root),
+        "invalid_node": _query(999999999, version, state_id=root),
+        "hard_node_cap": neighborhood(root, max_nodes=4001),
+        "hard_byte_cap": neighborhood(root, max_encoded_bytes=512 * 1024 + 1),
+    }
+
+
 def _remote_request(session, base_url, path, headers):
     started = time.perf_counter_ns()
     try:
@@ -92,9 +170,9 @@ def main():
     parser.add_argument("base_url")
     parser.add_argument("service_token_file", type=Path)
     parser.add_argument("protection_bypass_token_file", type=Path)
-    parser.add_argument("--deep-node", type=int, required=True)
-    parser.add_argument("--internal-ending-node", type=int, required=True)
-    parser.add_argument("--drop-node", type=int, required=True)
+    parser.add_argument("--deep-node", type=int)
+    parser.add_argument("--internal-ending-node", type=int)
+    parser.add_argument("--drop-node", type=int)
     parser.add_argument("--report", type=Path, required=True)
     args = parser.parse_args()
     if args.report.exists():
@@ -161,9 +239,7 @@ def main():
                 etag_equal = local_response.headers.get(
                     "etag"
                 ) == remote_response.headers.get("etag")
-                status_equal = (
-                    local_response.status_code == remote_response.status_code
-                )
+                status_equal = local_response.status_code == remote_response.status_code
                 report["cases"][name] = {
                     "body_bytes": len(remote_response.content),
                     "body_equal": body_equal,
@@ -175,7 +251,7 @@ def main():
                 if name == "root":
                     local_root_etag = local_response.headers.get("etag")
                     remote_root_etag = remote_response.headers.get("etag")
-                if not (body_equal and status_equal):
+                if not (body_equal and status_equal and etag_equal):
                     failures.append(name)
 
             root_path = cases["root"]
@@ -192,10 +268,10 @@ def main():
                 {**remote_headers, "If-None-Match": remote_root_etag},
             )
             not_modified_ok = (
-                local_not_modified.status_code
-                == remote_not_modified.status_code
-                == 304
+                local_not_modified.status_code == remote_not_modified.status_code == 304
                 and local_not_modified.content == remote_not_modified.content == b""
+                and local_not_modified.headers.get("etag")
+                == remote_not_modified.headers.get("etag")
             )
             report["cases"]["root_not_modified"] = {
                 "body_bytes": len(remote_not_modified.content),
