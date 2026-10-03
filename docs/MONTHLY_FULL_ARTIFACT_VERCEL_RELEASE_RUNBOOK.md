@@ -84,6 +84,12 @@ or source-retention behavior is unknown and material to the release.
 
 ## Phase 2 — restore and build two immutable artifacts
 
+The measured source-delta and incremental-builder proposal is recorded in
+[`OPENING_INCREMENTAL_REFRESH_ANALYSIS_2026-10-03.md`](OPENING_INCREMENTAL_REFRESH_ANALYSIS_2026-10-03.md).
+Its diagnostic subsets are incomplete and must not be used as release inputs.
+The proposed incremental commands are not implemented; use the complete builds
+below until full-scale parity and recovery evidence supports a revised gate.
+
 Follow `BACKUP_RECOVERY.md` to restore a separate monthly source snapshot.
 Record the compressed and restored hashes and rerun the SQLite integrity and
 domain-invariant checks against that restored copy. Do not substitute the live

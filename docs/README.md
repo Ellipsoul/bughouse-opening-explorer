@@ -51,7 +51,18 @@ for the completed interruption rehearsal, full upload, protected Preview,
 Production materialization, oracle, browser, cost, cleanup, and rollback
 evidence. Use
 [`MONTHLY_FULL_ARTIFACT_VERCEL_RELEASE_RUNBOOK.md`](MONTHLY_FULL_ARTIFACT_VERCEL_RELEASE_RUNBOOK.md)
-for the repeatable next-snapshot procedure and failure guardrails. Then read
+for the repeatable next-snapshot procedure and failure guardrails. Read
+[`OPENING_INCREMENTAL_REFRESH_ANALYSIS_2026-10-03.md`](OPENING_INCREMENTAL_REFRESH_ANALYSIS_2026-10-03.md)
+for the measured August-to-September source delta, older-tail repair evidence,
+and proposed durable support/owner store with unchanged packed v2 publication.
+The incremental builder is planned; the current dual-full-build release gate
+still applies. To implement and execute the next local update, use
+[`OPENING_INCREMENTAL_REFRESH_HANDOFF_2026-10-03.md`](OPENING_INCREMENTAL_REFRESH_HANDOFF_2026-10-03.md)
+and its copy-ready
+[`OPENING_INCREMENTAL_REFRESH_SESSION_PROMPT.md`](OPENING_INCREMENTAL_REFRESH_SESSION_PROMPT.md).
+They aggregate the exact sources, retained evidence, uncommitted work,
+implementation gates, release-tooling repairs, and authorization boundaries.
+Then read
 [`VERCEL_LARGE_FUNCTION_PREVIEW_PLAN_2026-08-04.md`](VERCEL_LARGE_FUNCTION_PREVIEW_PLAN_2026-08-04.md)
 for the operative contract. The earlier local transport and preflight evidence
 is in

@@ -121,6 +121,33 @@ def test_two_pass_graph_keeps_unique_bridges_to_a_shared_transposition(tmp_path)
         }
 
 
+def test_addition_extends_an_older_tail_and_removal_restores_the_original_graph(tmp_path):
+    original = game("a", (E4, E5, NF3))
+    newcomer = game("b", (E4, E5, D4))
+    for name, games in (
+        ("before", [original]),
+        ("after", [original, newcomer]),
+        ("removed", [original]),
+    ):
+        outcomes = _outcomes(games)
+        build_two_pass_position_graph(
+            lambda: iter(outcomes),
+            tmp_path / name,
+            source_fingerprint="threshold-transition-contract",
+            temporary_directory=tmp_path / f"{name}-scratch",
+        )
+    with PackedPositionGraph(tmp_path / "before") as reader:
+        frontier = _trace(reader, (E4,))
+        assert frontier.branches == ()
+        assert frontier.actual_ending_count == 0
+    with PackedPositionGraph(tmp_path / "after") as reader:
+        shared = _trace(reader, (E4, E5))
+        assert shared.state_support == 2
+        assert _trace(reader, original.move_tokens).actual_ending_count == 1
+    for path in (tmp_path / "before").iterdir():
+        assert path.read_bytes() == (tmp_path / "removed" / path.name).read_bytes()
+
+
 def test_two_pass_graph_drops_only_the_proven_dead_unique_tail(tmp_path):
     games = [
         game("a", (E4, E5, NF3)),
