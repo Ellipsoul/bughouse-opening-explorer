@@ -7,11 +7,12 @@ and complete Player Insights refresh, follow
 [`MONTHLY_DATA_AND_PLAYER_INSIGHTS_RUNBOOK.md`](MONTHLY_DATA_AND_PLAYER_INSIGHTS_RUNBOOK.md).
 It is the operator entrypoint for `scripts/run_monthly_refresh.py`, interruption
 recovery, verification, new-insight registration, and rollback boundaries.
-The latest completed refresh, for September 2026, is recorded in
-[`MONTHLY_DATA_AND_PLAYER_INSIGHTS_RESULT_2026-10-02.md`](MONTHLY_DATA_AND_PLAYER_INSIGHTS_RESULT_2026-10-02.md),
-including the 56-player enrollment ledger, terminal outcomes, immutable
-identities, projection sizes/checksums, integrity-gate repair, verification,
-and exact rollback inputs. The completed first execution is recorded in
+The latest completed refresh is October-only, with exclusive cutoff 1 November
+2026 00:00 UTC, recorded in
+[`MONTHLY_DATA_AND_PLAYER_INSIGHTS_RESULT_2026-11-01.md`](MONTHLY_DATA_AND_PLAYER_INSIGHTS_RESULT_2026-11-01.md).
+Earlier September evidence remains in
+[`MONTHLY_DATA_AND_PLAYER_INSIGHTS_RESULT_2026-10-02.md`](MONTHLY_DATA_AND_PLAYER_INSIGHTS_RESULT_2026-10-02.md).
+The completed first execution is recorded in
 [`MONTHLY_DATA_AND_PLAYER_INSIGHTS_RESULT_2026-09-01.md`](MONTHLY_DATA_AND_PLAYER_INSIGHTS_RESULT_2026-09-01.md),
 including the 68-player enrollment ledger, snapshot and artifact identities,
 projection checksums, and end-to-end verification evidence.
@@ -48,13 +49,14 @@ analysis-board renderer, and validation evidence are recorded in
 
 For recurring **Opening Explorer updates**, start with
 [`OPENING_INCREMENTAL_RUNBOOK.md`](OPENING_INCREMENTAL_RUNBOOK.md).
-The validated September local candidate and completed August-to-September proof
-are in [`OPENING_INCREMENTAL_RESULT_2026-10-03.md`](OPENING_INCREMENTAL_RESULT_2026-10-03.md).
-For its deployment, use the exact
-[`release packet`](OPENING_INCREMENTAL_RELEASE_PACKET_2026-10-03.md) and
-[`monthly release runbook`](MONTHLY_FULL_ARTIFACT_VERCEL_RELEASE_RUNBOOK.md).
-Production remains August until the separately approved cutover. Independent
-A/B full-build release validation remains required.
+The current local October-only candidate and revised routine gate are recorded in
+[`OPENING_INCREMENTAL_RESULT_2026-11-02.md`](OPENING_INCREMENTAL_RESULT_2026-11-02.md).
+Routine updates use `incremental-integrity-v1` and release the validated incremental
+v2 export. Full rebuild comparisons are reserved for requested audits or relevant
+migrations. Historical September parity remains in
+[`OPENING_INCREMENTAL_RESULT_2026-10-03.md`](OPENING_INCREMENTAL_RESULT_2026-10-03.md).
+External release follows the [monthly release runbook](MONTHLY_FULL_ARTIFACT_VERCEL_RELEASE_RUNBOOK.md)
+with separate authorization; no production change occurred in the October update.
 
 Consult historical migration material only when investigating the design:
 [`analysis`](OPENING_INCREMENTAL_REFRESH_ANALYSIS_2026-10-03.md),

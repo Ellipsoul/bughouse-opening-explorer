@@ -2,8 +2,12 @@
 
 The full August-to-September migration is proved by complete A/B/incremental
 byte parity. See the [dated result](OPENING_INCREMENTAL_RESULT_2026-10-03.md).
-The existing independent A/B full-build release gate remains mandatory.
-Representative parity alone does not authorize release or replace that gate.
+Effective 2 November 2026, explicit user authorization supersedes the former
+mandatory full A/B and full-versus-incremental byte-parity gate for routine
+updates. The routine gate is `incremental-integrity-v1`, specified below.
+Independent full comparisons are reserved for explicitly requested audits or
+relevant algorithm/policy migrations; small regression fixtures may still use
+full replay as an oracle.
 
 ## Routine monthly path
 
@@ -14,8 +18,8 @@ there is no need to repeat bootstrap when a verified completed parent exists.
 1. Validate the new complete immutable snapshot against its completed crawl run.
 2. Verify the completed parent, reserve a fresh child/output label and disk budget.
 3. Run `update`, or `resume` on the same child/source after an interruption.
-4. Export v1, repack v2, audit the delta and compare with the independent A/B gate.
-5. Run service/frontend checks and prepare transport for the exact allowed A name.
+4. Export v1, repack v2, audit and reconcile the complete delta, and execute the routine acceptance gate.
+5. Run regression/recovery, local service and desktop/mobile frontend checks. The validated incremental v2 export is the routine candidate; use its exact allowed name.
 6. Follow the [release runbook](MONTHLY_FULL_ARTIFACT_VERCEL_RELEASE_RUNBOOK.md)
    for separately authorized Preview, Production and rollback actions.
 
@@ -145,25 +149,73 @@ An interrupted export leaves its partial output and scratch intact. Retry export
 under a fresh output label; never overwrite it or call it valid without its final
 manifest and complete artifact validation. Repack has the same fresh-output rule.
 
-## Complete delta and byte-parity audit
+## Routine acceptance gate: incremental-integrity-v1
+
+Use the checked complete snapshot and an explicit exclusive UTC cutoff. This
+October update uses `end_time < 1793491200`; November games and qualification
+based solely on November must not enter its source or insights. The retained raw
+acquisition is provenance, not the bounded analysis input.
 
 ```bash
 PYTHONPATH=. .venv/bin/python scripts/report_opening_incremental_delta.py \
   <completed-child-generation> <fresh-delta-report-directory>
-
-PYTHONPATH=. .venv/bin/python scripts/verify_opening_artifact_parity.py \
-  <full-v1-a> <full-v1-b> <incremental-v1> --report <fresh-v1-parity.json>
-
-PYTHONPATH=. .venv/bin/python scripts/verify_opening_artifact_parity.py \
-  <full-v2-a> <full-v2-b> <incremental-v2> --report <fresh-v2-parity.json>
+PYTHONPATH=. .venv/bin/python scripts/validate_opening_incremental_release.py \
+  --source <checked-target.db> --source-sha256 <sha256> --cutoff <exclusive-epoch> \
+  --parent <completed-parent> --child <completed-child> \
+  --artifact <incremental-v2-directory> --delta <delta-report-directory> \
+  --report <fresh-acceptance.json>
+PYTHONPATH=. .venv/bin/pytest -q
 ```
 
-The delta report enumerates every changed UUID, threshold placement and repaired
-threshold owner in JSONL, and replays owners to measure complete frontier changes
-and newly reached true endings. It records raw/metadata field changes, renames and
-every replay exclusion. Its verification time is separate from update/export time.
-The parity command recomputes artifact validation and compares component sizes,
-SHA-256 and exact manifest serialization. A mismatch leaves its report and fails.
+For a fresh post-export evidence directory, `scripts/run_opening_incremental_checks.py`
+orchestrates repack/delta (reusing completed outputs), acceptance, v1/v2 semantic
+checks, backend regression and graph checks. Pass `--source`, `--source-sha256`,
+`--cutoff`, `--parent`, `--child`, `--v1`, `--v2`, `--delta`, and `--evidence`.
+It acquires the generation writer lock, refuses overwrites, never launches a full
+builder, and explicitly leaves HTTP/browser/frontend evidence pending. Do not
+run it alongside an existing supervisor or export writer; adopt or finish that
+writer first. Interrupted exports/repack need fresh output paths.
+
+The gate rejects source checksum/cutoff/integrity/closure violations, mismatched
+parent linkage or source/policy identities, incomplete or uncheckpointed children,
+and changed checkpoint bytes. Completion must include the engine's full support
+and owner consistency stage: positive support, accepted singleton owners, shared
+counts and XOR membership accumulators, replay of touched singleton owners,
+root reconciliation, membership ownership and exactly two player postings per
+accepted game. Reuse that completed proof only with unchanged checkpoint hashes
+and pinned implementation policy; do not repeat the expensive stage needlessly.
+
+The complete delta report replays affected threshold owners and enumerates all
+source changes, corrections, metadata/renames, removals, admission changes,
+exclusions, promotion/demotion placements and repaired owners. The acceptance
+checker independently compares parent/child ledgers and reconciles every ordered
+change witness, totals, exclusions, threshold placement and owner witness. It
+also checks full source UUID/order/date coverage and validates all exported
+component bytes/hashes/structure, source fingerprint and accepted-game totals.
+
+Require the backend regression suite, including incremental correction/deletion,
+threshold and durable recovery fixtures, acceptance rejection fixtures, and exact
+transport/stage/runtime allowlist tests. Retain passed frontend unit/component,
+type/lint/build checks when inputs have not changed. Compare v1-to-v2 semantic
+metadata and sampled states (a format conversion check, not an independent full
+rebuild), then run local graph/startup/HTTP-oracle checks and desktop/mobile
+browser checks. Record each result separately; the acceptance JSON alone is not
+proof that browser or regression checks ran.
+
+The routine release candidate is the **validated incremental v2 export**. Retain
+its v1 export, parent/child completion records, cutoff lineage, delta JSONL,
+acceptance report, test and browser evidence, and previous rollback artifacts.
+No routine phase may launch or wait for full A/B builds or treat their intentional
+cancellation as failure. When replacing a live supervisor, disable its launch and
+wait paths first, adopt the existing incremental process, then stop only owned
+full-reference/dependent jobs and record intentional cancellation. Retain partials.
+
+Assurance limit: this proves pinned-source consistency, durable incremental
+invariants, complete delta accounting, artifact integrity and tested behavior.
+It does **not** prove byte identity to an independently rebuilt corpus; common-mode
+adapter, incremental-engine or exporter defects remain possible. An explicit
+full-rebuild audit or relevant policy/algorithm migration can add that stronger
+comparison; it is not a routine prerequisite. Do not claim cancelled checks passed.
 
 The local filesystem receiver rehearsal is:
 
@@ -181,12 +233,10 @@ acknowledgements; it is not evidence that a hosting provider has received bytes.
 
 ## Required release evidence
 
-For this first migration retain two independent full target builds A/B, two v2
-repacks, and the separate incremental comparison export. A alone is a release
-candidate. Require exact component size/hash and manifest parity, complete source
-metadata parity, representative filtered/unfiltered semantics, source exclusions
-and delta reconciliation, complete affected-owner evidence, recovery tests,
-resource measurements and local service/browser validation.
+For routine months retain the acceptance evidence above and exact incremental
+candidate identity. For an explicitly requested full audit or relevant migration,
+add independently built full references and complete component/manifest comparison
+as specified by that audit; historical migration evidence remains preserved.
 
 Use the graph benchmark and graph-aware HTTP oracle. Preserve 500-node/256-KiB
 response defaults and 4,000-node/512-KiB hard caps. The frontend source-default
@@ -194,37 +244,38 @@ proxy timeout is 45 seconds and the maximum is 60 seconds; inspect the actual
 scoped override before release, without treating Sensitive placeholders as values.
 
 Follow [the full release runbook](MONTHLY_FULL_ARTIFACT_VERCEL_RELEASE_RUNBOOK.md)
-for exact A-name transport/stage/runtime allowlists, deterministic offline chunks,
+for exact incremental-candidate transport/stage/runtime allowlists, deterministic offline chunks,
 retry/reconstruction, runtime attestation, and the concrete approval packet.
 External upload, hosting changes, paid resources, Preview creation, Production
 promotion, alias changes, deletion, commits and pushes require separate authority.
 
-When reserving a later month's A name, retain this month's exact name as a
+When reserving a later month's incremental candidate name, retain this month's exact name as a
 rollback entry in the transport, stage and runtime authorization sets before
-changing the candidate constant. Test that both the new A and retained rollback
-are allowed, while the new B/comparison names are rejected. Do not replace exact
+changing the candidate constant. Test that both the new candidate and retained rollback
+are allowed, while unapproved full/comparison names are rejected. Do not replace exact
 names with a prefix or wildcard.
 
 Future months use the checked target as parent and the next complete snapshot as
-input. Routine dual-full replay may only be replaced by an explicit revised gate
-supported by the completed full-scale parity, correction and recovery evidence;
-this runbook does not waive it. Rollback keeps the prior artifact/deployment and
-restores only the separately approved serving pointer/alias. Dataset-versioned
-browser caches then invalidate normally; checkpoints never serve browser reads.
+input. Full rebuild comparisons require an explicit audit or relevant migration.
+Rollback keeps the prior artifact/deployment and restores only the separately
+approved serving pointer/alias. Dataset-versioned browser caches then invalidate
+normally; checkpoints never serve browser reads.
 
 ## Current parent and resource planning
 
 The next update's parent is
-`artifacts/opening-incremental-20261003-r1/september`, checked with:
+`artifacts/opening-incremental-20261101-october-only-r3/october`, checked with:
 
 ```bash
 PYTHONPATH=. .venv/bin/python scripts/opening_incremental.py verify \
-  artifacts/opening-incremental-20261003-r1/september
+  artifacts/opening-incremental-20261101-october-only-r3/october
 ```
 
-Its checkpoint is 70,723,231,744 bytes, including an 8,028,999,680-byte complete
-support table. Budget the retained parent, independent child copy, full-reference
-scratch, exports and transport together. Recheck available space each month.
+Its checkpoint is 71,690,526,720 bytes, SHA-256
+`a5b7c35015fca00c210271cd7be747fd32e5cd74e20f78a90a9d8714fe11e469`.
+It is built from the October-only source recorded in
+`OPENING_INCREMENTAL_RESULT_2026-11-02.md`. Budget the retained parent,
+independent child copy, discovery/repair spill, exports and transport together. Recheck available space each month.
 The dated result contains complete timings/RSS/disk measurements; none is a
 promise of next-month duration. Source hashes, semantic policy and engine files
 are pinned: avoid cosmetic reformatting of pinned modules during a generation.

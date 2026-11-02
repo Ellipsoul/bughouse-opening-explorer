@@ -1,5 +1,11 @@
 # Monthly full-artifact Vercel release runbook
 
+“Full artifact” means the complete serving corpus, not a mandatory full replay.
+Routine releases use the validated incremental export under the explicitly
+revised 2 November 2026 policy. No external release is authorized merely by
+passing the local acceptance gate.
+
+
 ## Purpose
 
 Use this runbook when publishing the next immutable monthly opening snapshot.
@@ -47,13 +53,13 @@ Create a dated result document and fill this ledger before any upload:
 | --- | --- |
 | restored snapshot path | immutable path outside `data/crawler.db` |
 | restored snapshot SHA-256 | exact lowercase digest |
-| artifact A path | only upload candidate |
-| artifact B path | immutable reproducibility oracle |
+| incremental v2 artifact path | routine upload candidate after all local gates |
+| incremental parent/child | checksummed durable lineage |
 | dataset version | manifest-derived digest |
 | accepted games | exact count |
 | component bytes | exact sum, excluding artifact manifest |
 | component manifest | path, bytes, SHA-256 for every component |
-| A/B comparison | component-identical, or stop |
+| incremental acceptance | source/cutoff, completion, support/owner, complete delta and artifact integrity; tests/service/browser evidence |
 | local startup and RSS | cold/warm latency and peak RSS |
 | retained rollback ID | currently active known-good deployment |
 | Vercel CLI versions | local and remote builder |
@@ -73,7 +79,7 @@ Create a dated result document and fill this ledger before any upload:
 4. Refresh official Vercel limits and pricing. Separate documented guarantees
    from observed behavior and inference.
 5. Verify local disk, memory, file descriptors, and temporary write headroom.
-   Budget for the restored snapshot, A, B, deterministic chunks, staged source,
+   Budget for the restored snapshot, parent/child, incremental export, deterministic chunks, staged source,
    reconstructed artifact, and one recovery copy at the same time.
 6. Verify the latest Vercel CLI locally. Run an exact local Large Functions
    build before uploading. A stale CLI can incorrectly enforce the ordinary
@@ -82,64 +88,38 @@ Create a dated result document and fill this ledger before any upload:
 Stop if the current Large Functions limit, remote build disk, plan eligibility,
 or source-retention behavior is unknown and material to the release.
 
-## Phase 2 — restore and build two immutable artifacts
+## Phase 2 — build and validate the incremental candidate
 
-The measured source-delta and incremental-builder proposal is recorded in
-[`OPENING_INCREMENTAL_REFRESH_ANALYSIS_2026-10-03.md`](OPENING_INCREMENTAL_REFRESH_ANALYSIS_2026-10-03.md).
-Its diagnostic subsets are incomplete and must not be used as release inputs.
-The proposed incremental commands are not implemented; use the complete builds
-below until full-scale parity and recovery evidence supports a revised gate.
+Effective 2 November 2026, the user's explicit workflow revision supersedes the
+former routine full A/B rebuild and full-versus-incremental parity requirement.
+Follow `OPENING_INCREMENTAL_RUNBOOK.md` and its `incremental-integrity-v1` gate:
+checked bounded snapshot, completed parent/child with pinned policy, full support
+and owner consistency, complete delta reconciliation, canonical incremental v1
+export and validated v2 repack, regression/recovery tests, local service and
+wide/narrow browser checks. Record the source cutoff and exact component manifest.
 
-Follow `BACKUP_RECOVERY.md` to restore a separate monthly source snapshot.
-Record the compressed and restored hashes and rerun the SQLite integrity and
-domain-invariant checks against that restored copy. Do not substitute the live
-crawler database.
+The validated incremental v2 directory is the routine release candidate. A/B
+comparisons are reserved for explicitly requested audits or relevant algorithm or
+policy migrations. They must not be silently launched, awaited, or reported as
+passed in routine work. Preserve all cancelled audit partials/logs and record why
+cancellation is intentional. The assurance limit is absence of independent
+whole-corpus rebuild parity; common-mode implementation defects remain possible.
 
-Use month-specific immutable names. First build the semantic v1 oracle from the
-checked snapshot, then deterministically repack it as the browser-serving v2
-artifact. Replace every angle-bracket value and use separate output and
-temporary directories for A and B:
-
-```text
-.venv/bin/python scripts/build_opening_position_graph.py \
-  <restored-snapshot.db> \
-  artifacts/opening/<monthly-v1-oracle-name>-a \
-  --temporary-directory <absolute-temp-a> \
-  --snapshot-sha256 <restored-snapshot-sha256> \
-  --sample-modulus 1 \
-  --sample-remainder 0 \
-  --result <absolute-v1-build-a-result.json>
-
-.venv/bin/python scripts/repack_opening_position_graph_v2.py \
-  artifacts/opening/<monthly-v1-oracle-name>-a \
-  artifacts/opening/<monthly-v2-artifact-name>-a
-```
-
-Repeat both commands for artifact B with different output and temporary
-directories. Preserve the v1 builds as local semantic oracles; only v2 A is an
-upload candidate. Then:
-
-1. run complete artifact validation on A and B;
-2. record every component byte count and SHA-256;
-3. run `diff -rq <v2-artifact-a> <v2-artifact-b>`;
-4. confirm accepted-game, node, edge, ending, skip, and dataset-version counts;
-5. mark A as the only upload candidate and make B immutable;
-6. preserve the restored snapshot SHA-256 as the source identity.
-
-If A and B are not component-identical, stop. Do not select the artifact that
-merely looks more plausible.
+The incremental acceptance report does not authorize upload or deployment. Retain
+all existing separate approval, transport, runtime attestation, rollback and
+production checks in the remaining phases.
 
 ## Phase 3 — update the explicit monthly allowlist using TDD
 
 The service intentionally rejects unapproved artifact directory names. Before
 staging a new month:
 
-1. add a failing test for the exact new artifact-A name;
+1. add a failing test for the exact new incremental-v2 candidate name;
 2. update the explicit allowlists in
    `bughouse_explorer/opening/vercel_transport.py`,
    `bughouse_explorer/opening/vercel_stage.py`, and
    `bughouse_explorer/opening/vercel_hosted.py`;
-3. keep artifact B rejected;
+3. keep unapproved full-reference/comparison names rejected;
 4. keep representative and obsolete names read-only or rejected according to
    the current rollback policy;
 5. run the focused tests, then the complete Python suite.
@@ -152,12 +132,12 @@ value. Exact names are a publication safety boundary.
 Run, at minimum:
 
 ```text
-.venv/bin/python scripts/benchmark_opening_startup.py <artifact-a> --repeats 20
-.venv/bin/python scripts/benchmark_opening_position_graph.py <artifact-a> --repeats 20
-.venv/bin/python scripts/benchmark_opening_publication_lifecycle.py <current-artifact> <artifact-a> <absolute-temp-current-pointer.json>
+.venv/bin/python scripts/benchmark_opening_startup.py <incremental-v2-candidate> --repeats 20
+.venv/bin/python scripts/benchmark_opening_position_graph.py <incremental-v2-candidate> --repeats 20
+.venv/bin/python scripts/benchmark_opening_publication_lifecycle.py <current-artifact> <incremental-v2-candidate> <absolute-temp-current-pointer.json>
 ```
 
-Start the local read service only against artifact A and run the HTTP,
+Start the local read service only against the validated incremental candidate and run the HTTP,
 concurrency, cancellation, ETag, filter, ending, drop, source-game, hard-cap,
 and browser matrix from the latest result. Keep the default 500-node/256-KiB
 budgets and 4,000-node/512-KiB hard caps unless a separate design change is
@@ -188,12 +168,12 @@ First run the preparer without `--write` and review its full inclusion and
 space report. Then write chunks:
 
 ```text
-.venv/bin/python scripts/prepare_vercel_transport.py <artifact-a> \
+.venv/bin/python scripts/prepare_vercel_transport.py <incremental-v2-candidate> \
   --chunk-directory <absolute-chunk-directory> \
   --manifest-output <absolute-transport-manifest.json> \
   --chunk-size 67108864
 
-.venv/bin/python scripts/prepare_vercel_transport.py <artifact-a> \
+.venv/bin/python scripts/prepare_vercel_transport.py <incremental-v2-candidate> \
   --chunk-directory <absolute-chunk-directory> \
   --manifest-output <absolute-transport-manifest.json> \
   --chunk-size 67108864 \
@@ -216,7 +196,7 @@ Stage the exact service boundary plus chunks:
 ```
 
 Review `bundle-manifest.json`. It must exclude snapshots, SQLite, raw data,
-artifact B, other artifacts, credentials, journals, and repository history.
+unapproved reference artifacts, other artifacts, credentials, journals, and repository history.
 The generated build command must write `opening-artifact-attestation.json` only
 after reconstruction and complete validation, and the Function include-files
 boundary must contain both that attestation and the reconstructed artifact.
@@ -289,12 +269,13 @@ service token, and `VERCEL_SUPPORT_LARGE_FUNCTIONS=1` through the current
 server-side process only. Do not place them in arguments, reports, Git, or a
 browser variable.
 
-Set the non-secret `OPENING_EXPLORER_ARTIFACT_NAME` to the exact approved A name
+Set the non-secret `OPENING_EXPLORER_ARTIFACT_NAME` to the exact approved incremental-candidate name
 in both build and runtime scopes. The staged include path alone does not select
 the runtime reader; omitting this setting can select the representative default.
-For the September migration the only new allowed name is
-`full-position-graph-through-202609-20261003-r1-v2-a`. B and incremental comparison
-outputs are not upload candidates. Preserve this exact selection in any approved
+For the October-only routine update the exact new candidate name is
+`incremental-position-graph-through-202610-20261101-october-only-r3-v2`.
+Retain the September A and earlier existing rollback names as exact authorized
+rollback entries. October full A/B and arbitrary near-match names remain rejected. Preserve this exact selection in any approved
 Production clone, while letting Vercel bind its existing Production credential.
 
 On retry or a service-only correction, use
@@ -426,13 +407,13 @@ After the full Production path passes:
 
 The release is complete only when:
 
-- A and B are component-identical;
+- the incremental candidate passed the routine integrity/delta/regression/service/browser gate;
 - journal interruption/restart is proved;
 - remote reconstruction matches every local byte count and SHA-256;
 - the protected Preview and public Production proxy match the local oracle;
 - public cold and 64-concurrency requests fit the approved timeout;
 - the browser shows the full counts and preserves the existing viewer;
-- Production points to the new full artifact;
+- Production points to the exact approved incremental artifact;
 - a named known-good deployment remains a tested alias rollback;
 - failed and placeholder-token candidates and temporary credentials are gone;
 - exact costs, included-usage exposure, and beta limitations are documented;

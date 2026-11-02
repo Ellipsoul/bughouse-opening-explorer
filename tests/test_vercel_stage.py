@@ -175,6 +175,10 @@ def test_large_preview_stage_rejects_a_corrupt_upload_input_chunk(tmp_path):
 
 
 @pytest.mark.parametrize('name,allowed',[
+    ('incremental-position-graph-through-202610-20261101-october-only-r3-v2',True),
+    ('full-position-graph-through-202610-20261101-october-only-r4-v2-a',False),
+    ('full-position-graph-through-202610-20261101-october-only-r4-v2-b',False),
+    ('incremental-position-graph-through-202610-20261101-october-only-r3-v2-unapproved',False),
     ('full-position-graph-through-202609-20261003-r1-v2-a',True),
     ('full-position-graph-through-202609-20261003-r1-v2-b',False),
     ('incremental-position-graph-through-202609-20261003-r1-v2',False),

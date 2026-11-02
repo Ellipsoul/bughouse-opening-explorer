@@ -236,6 +236,10 @@ rebuilding/redeploying the frontend; the immutable raw snapshot and derived
 SQLite artifact can remain for reproduction and comparison.
 
 This workflow does not rebuild or release the multi-gigabyte packed Opening
-Explorer artifact. When that is desired for the same source snapshot, follow
-`MONTHLY_FULL_ARTIFACT_VERCEL_RELEASE_RUNBOOK.md` as a separate approval-gated
-operation.
+Explorer artifact. When requested for the same source snapshot, follow
+`OPENING_INCREMENTAL_RUNBOOK.md` for the local routine incremental acceptance
+gate. The validated incremental v2 export is the candidate; full A/B rebuilds
+are not routine requirements. External release remains separately approval-gated
+under `MONTHLY_FULL_ARTIFACT_VERCEL_RELEASE_RUNBOOK.md`. An explicit completed-month
+cutoff overrides this runner’s default partial-current-month inclusion; validate
+the bounded source and cohort before building either insights or the tree.
