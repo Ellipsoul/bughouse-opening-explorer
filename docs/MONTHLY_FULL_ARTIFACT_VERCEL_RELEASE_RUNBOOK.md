@@ -6,6 +6,17 @@ revised 2 November 2026 policy. No external release is authorized merely by
 passing the local acceptance gate.
 
 
+## Operator contract and current release
+
+Start with [the operator checklist](MONTHLY_UPDATE_OPERATOR_CHECKLIST.md).
+The user's explicit release scope takes precedence over the default Preview
+sequence. A request for direct Production authorizes that route without asking
+again for Preview; preserve the same immutable stage, target/rollback checks,
+remote attestation and API verification. Browser checks may be delegated to the
+user when they explicitly request that. Do not reopen a browser in that case.
+The [3 November release](OPENING_PRODUCTION_RELEASE_2026-11-03.md) records this
+path and its limits. Preparation, upload and deployment are distinct states.
+
 ## Purpose
 
 Use this runbook when publishing the next immutable monthly opening snapshot.
@@ -65,6 +76,22 @@ Create a dated result document and fill this ledger before any upload:
 | Vercel CLI versions | local and remote builder |
 | plan and limits | current official documentation and live plan |
 | approvals | rehearsal, full Preview, Production, cleanup separately |
+
+## Authentication and process checks before external work
+
+Use noninteractive CLI mode (`CI=1`) for preflight. `whoami` can use cached
+identity; verify a real authenticated project GET just before upload so the CLI
+can refresh its short-lived session. The streaming uploader does not refresh a
+CLI token itself. A 401/403 `invalidToken` is an authentication failure, not a
+corrupt chunk; refresh through the CLI, then resume the same acknowledgement
+journal. Never print credentials, pass them in process arguments, copy pulled
+Sensitive placeholders, or mint a replacement service secret unnecessarily.
+
+Record the current CLI version and use that exact version for local packaging.
+A quiet build may be reconstructing/validating for minutes: check its child
+process and progress before stopping it. Inspect surviving children before any
+retry. Preserve a partial build and use a fresh build copy, not a destructive
+cleanup or a second writer over its output.
 
 ## Phase 1 — reconcile before building
 
@@ -314,7 +341,7 @@ Before promotion, update the service project's Production-scoped non-secret
 values, with approval:
 
 - `VERCEL_SUPPORT_LARGE_FUNCTIONS=1`;
-- `OPENING_EXPLORER_ARTIFACT_NAME=<exact-new-artifact-a-name>`.
+- `OPENING_EXPLORER_ARTIFACT_NAME=<exact-new-incremental-v2-artifact-name>`.
 
 Keep the existing Sensitive `OPENING_EXPLORER_SERVICE_TOKEN`; do not replace it
 with a pulled placeholder.
@@ -419,3 +446,34 @@ The release is complete only when:
 - exact costs, included-usage exposure, and beta limitations are documented;
 - the release result and runbook changes are committed without generated or
   sensitive material.
+
+
+## Explicit direct-Production route
+
+When the user explicitly skips Preview, retain phases 1–5 and use the exact
+validated source stage. The current uploader's historical `--create-preview`
+flag means "create deployment"; with `--target production` it creates Production
+and assigns its domains, not a Preview. Its dry-run prose still contains
+Preview/unchanged-Production wording: do not quote that prose as the effect of
+a Production request. Record the actual target/alias effect in the release ledger.
+This naming/reporting mismatch is a tooling follow-up.
+
+Supply the exact artifact name in build and runtime overrides, and
+`VERCEL_SUPPORT_LARGE_FUNCTIONS=1` in the build scope. Inherit the existing
+Production project service token; do not supply a Preview token or a local-build
+fixture. A deployment-level artifact override is sufficient for that deployment;
+record whether the project-level default remains on the prior artifact so future
+releases do not silently select it. Do not change unrelated project settings.
+
+Persist a deployment-request marker before POST and its returned deployment ID
+after success. A timeout after POST is ambiguous: inspect remote deployments
+before retrying, even if all files are acknowledged. Require READY and verify the
+canonical alias before calling the release live. Retain the previous deployment.
+
+The public frontend proxy can verify dataset, source fingerprint, exact decoded
+bodies/statuses, bounded errors, source-game paths and conditional GET without
+exporting backend credentials. Distinguish it from the protected-service oracle:
+compression/CDN layers can change strong/weak ETag representation. Record actual
+validators/encoding and verify 304 behavior; do not silently drop failed checks
+or describe proxy evidence as direct-runtime evidence. See the latest release
+result for measured evidence and any unresolved discrepancy.

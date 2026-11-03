@@ -11,7 +11,7 @@ full replay as an oracle.
 
 ## Routine monthly path
 
-Read this runbook and the latest result for the current parent and source identity.
+Read [the operator checklist](MONTHLY_UPDATE_OPERATOR_CHECKLIST.md), this runbook and the latest result for the current parent and source identity.
 The original migration analysis, session prompt and live progress log are history;
 there is no need to repeat bootstrap when a verified completed parent exists.
 
@@ -21,7 +21,8 @@ there is no need to repeat bootstrap when a verified completed parent exists.
 4. Export v1, repack v2, audit and reconcile the complete delta, and execute the routine acceptance gate.
 5. Run regression/recovery, local service and desktop/mobile frontend checks. The validated incremental v2 export is the routine candidate; use its exact allowed name.
 6. Follow the [release runbook](MONTHLY_FULL_ARTIFACT_VERCEL_RELEASE_RUNBOOK.md)
-   for separately authorized Preview, Production and rollback actions.
+   for separately authorized release and rollback actions. Explicit direct-Production
+   authorization supersedes Preview sequencing; it does not skip integrity gates.
 
 Bootstrap/validated-seed commands below are recovery and initial-migration tools.
 Use them only when there is no compatible completed parent.
@@ -29,8 +30,10 @@ Use them only when there is no compatible completed parent.
 ## Inputs and generations
 
 Use complete checked snapshots, never the live crawler or diagnostic subsets.
-The period is a corpus label, not an end-time filter. Retain historical backfills
-and partial current-month games. Record SHA-256, read-only SQLite integrity,
+The period is a corpus label, not an end-time filter. Retain historical backfills,
+but routine completed-month analysis excludes the current partial month. Verify
+the explicit exclusive cutoff and cohort qualification lineage before building.
+Retained newer raw acquisition is provenance, not approved analysis input. Record SHA-256, read-only SQLite integrity,
 latest completed run, qualification window and cohort closure before building:
 
 ```bash
@@ -39,7 +42,8 @@ PYTHONPATH=. .venv/bin/python scripts/validate_opening_snapshot.py \
 ```
 
 Reserve a fresh output label and capacity for parent plus child checkpoints,
-discovery spills, full-reference scratch, exports, transport and rollback. Never
+discovery spills, exports, transport and rollback. Full-reference scratch is
+needed only for an explicitly requested audit/migration. Never
 remove retained input or scratch to force a run to fit. Inspect owned processes
 before invoking a writer; each generation also holds a nonblocking writer lock.
 
@@ -221,7 +225,7 @@ The local filesystem receiver rehearsal is:
 
 ```bash
 PYTHONPATH=. .venv/bin/python scripts/rehearse_opening_transport_locally.py \
-  <exact-allowed-A-artifact> /private/tmp/<fresh-external-release-directory>
+  <exact-allowed-incremental-v2-artifact> /private/tmp/<fresh-external-release-directory>
 ```
 
 It double-generates the deterministic manifest, writes chunks, retains a partial

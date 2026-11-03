@@ -10,7 +10,22 @@ The workflow deliberately does **not** commit, push, upload, promote, or deploy.
 The checked JSON projections are the local publication boundary; any Preview or
 Production action remains a separate approval-gated release.
 
-## One-command normal run
+## Start with the run contract
+
+Read [the operator checklist](MONTHLY_UPDATE_OPERATOR_CHECKLIST.md) first.
+Routine analysis covers the completed UTC month and earlier history; exclude
+later games and qualification based solely on later evidence. Record the
+exclusive cutoff before acquisition. A period/filename is not a date filter.
+
+**Implementation gap:** the runner below still acquires the current partial
+month and snapshots all acquired rows. It does not implement the bounded
+analysis step used for October. Its `--snapshot` option selects an output path,
+not an existing checked input. Do not use the `--publish` example as a
+completed-month-only pipeline until that gap is implemented/tested. Separate
+acquisition from a validated bounded clone and then build insights from that
+same clone used by the opening tree. See the [cycle review](MONTHLY_UPDATE_REVIEW_2026-11-03.md).
+
+## Existing unbounded acquisition-to-insights command
 
 From `bughouse-opening-explorer` on the first day of the month:
 
@@ -48,7 +63,7 @@ Omit `--publish` to build and validate without changing the checked frontend
 files. The staged projections remain in the artifact's `projections/`
 directory for review.
 
-## Discovery policy
+## Acquisition discovery policy (distinct from analysis cutoff)
 
 The monthly crawl is not just a fixed-cohort fetch. It refreshes the completed
 month and current partial month for every player with

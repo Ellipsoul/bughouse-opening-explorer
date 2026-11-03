@@ -1,5 +1,11 @@
 # Documentation map
 
+For routine monthly updates, start with
+[`MONTHLY_UPDATE_OPERATOR_CHECKLIST.md`](MONTHLY_UPDATE_OPERATOR_CHECKLIST.md).
+It freezes scope/cutoff and distinguishes implemented automation from remaining
+gaps. The [October cycle review](MONTHLY_UPDATE_REVIEW_2026-11-03.md) records the
+lessons and next engineering work.
+
 Read these documents in this order when resuming work:
 
 For the recurring first-of-month acquisition, discovery, immutable snapshot,
@@ -49,14 +55,17 @@ analysis-board renderer, and validation evidence are recorded in
 
 For recurring **Opening Explorer updates**, start with
 [`OPENING_INCREMENTAL_RUNBOOK.md`](OPENING_INCREMENTAL_RUNBOOK.md).
-The current local October-only candidate and revised routine gate are recorded in
+The October-only candidate and revised routine gate are recorded in
 [`OPENING_INCREMENTAL_RESULT_2026-11-02.md`](OPENING_INCREMENTAL_RESULT_2026-11-02.md).
 Routine updates use `incremental-integrity-v1` and release the validated incremental
 v2 export. Full rebuild comparisons are reserved for requested audits or relevant
 migrations. Historical September parity remains in
 [`OPENING_INCREMENTAL_RESULT_2026-10-03.md`](OPENING_INCREMENTAL_RESULT_2026-10-03.md).
 External release follows the [monthly release runbook](MONTHLY_FULL_ARTIFACT_VERCEL_RELEASE_RUNBOOK.md)
-with separate authorization; no production change occurred in the October update.
+with explicit authorization. The October tree was released directly to Production
+on 3 November at the user's request; see
+[`OPENING_PRODUCTION_RELEASE_2026-11-03.md`](OPENING_PRODUCTION_RELEASE_2026-11-03.md).
+The retained September deployment is rollback evidence, not the current release.
 
 Consult historical migration material only when investigating the design:
 [`analysis`](OPENING_INCREMENTAL_REFRESH_ANALYSIS_2026-10-03.md),
@@ -109,7 +118,7 @@ evidence.
    materialization, protected Preview and Production oracle, browser and
    concurrency evidence, costs, cleanup, and retained rollback.
 12. [`MONTHLY_FULL_ARTIFACT_VERCEL_RELEASE_RUNBOOK.md`](MONTHLY_FULL_ARTIFACT_VERCEL_RELEASE_RUNBOOK.md)
-   — repeatable monthly restore, dual-build, allowlist, deterministic transport,
+   — repeatable monthly restore, incremental acceptance, allowlist, deterministic transport,
    interruption, protected Preview, Production clone, validation, rollback,
    cleanup, and release-ledger procedure.
 13. [`VERCEL_LARGE_FUNCTION_PREVIEW_PLAN_2026-08-04.md`](VERCEL_LARGE_FUNCTION_PREVIEW_PLAN_2026-08-04.md)
